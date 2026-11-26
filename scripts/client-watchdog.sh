@@ -12,7 +12,7 @@ set -euo pipefail
 ROUTER_HOST="${ROUTER_HOST:-192.168.50.1}"
 ROUTER_USER="${ROUTER_USER:-yano}"
 WATCH_DIR="${WATCH_DIR:-${HOME}/.local/share/opencode/log}"
-PATTERN="${PATTERN:-used today.*free messages|429|rate[- ]?limit|quota[- ]?exceeded|resource_exhausted}"
+PATTERN="${PATTERN:-used today.*free messages|free usage limit reached|connection lost due to|ECONNRESET|429|rate[- ]?limit|quota[- ]?exceeded|resource_exhausted}"
 MAX_DAILY_RECOVERIES="${MAX_DAILY_RECOVERIES:-10}"
 STATE_FILE="${STATE_FILE:-/tmp/opencode-client-watchdog.state}"
 TMUX_TARGET="${TMUX_TARGET:-opencode}"
