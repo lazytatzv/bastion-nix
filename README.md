@@ -1,205 +1,179 @@
-# Dotfiles
+# clubroom-router-nixos
 
-部室でルータ用に置いているnixosの設定ファイル管理用repo.
-
-`/etc/nixos/*`と一致しています.
-
-ルータ設定は以下を流用しています.
-
-[wifi_as_wan](https://github.com/lazytatzv/wifi_as_wan_with_nixos)
-
-## ネットワーク設定
-
-`iwd`と`systemd-networkd`を使用しています. `/var/lib/iwd`以下に設定ファイルを記述することで使用可能になります.
-
-大学のwifiに接続する時は、[iwd](https://wiki.archlinux.org/title/Iwd)の`3.2.2`を参考にするか、[wifi_as_wan](https://github.com/lazytatzv/wifi_as_wan_with_nixos)の設定ファイルを参考にすると良いでしょう.
-
-### 定期的なWAN IP・MACアドレスのローテーション
-
-大学のDHCPから接続ごとに新しいIPを取得するため、接続プロファイル（`/var/lib/iwd/<SSID>.8021x` または `.psk`）の `[Settings]` に以下を記述してください：
-
-```ini
-[Settings]
-AlwaysRandomizeAddress=true
-```
-
-- **自動ローテーション**: `systemd.timers.rotate-wan-ip` により2時間おき（約10〜12回/日）に自動でDHCPRELEASE送信とiwd再起動が行われ、古いIPを解放した上で新しいMACアドレスとIPが更新されます（`modules/router.nix` の `rotateWanIp` 設定で変更可能）。
-- **手動更新**: コマンド `renew-wan-ip` を実行することで、いつでも即座に新しいMACとIPアドレスを取得できます。
-
-## NAS設定
-
-`nfs`サーバを建てているのでLinuxユーザは簡単に利用することができます.
-
-```bash
-# nfs clientのインストール
-
-## arch
-sudo pacman -S nfs-utils
-
-## debian
-sudo apt install nfs-common
-
-# Load module
-sudo modprobe nfs
-
-## check
-lsmod | grep nfs
-
-# Mount
-# <IP ADDR>は実際のipアドレスに置き換えて下さい
-# tailscaleのdomainname/addressで問題ありません
-# マウントポイントも自由です(/mntじゃなくていい)
-sudo mount -t nfs <IP_ADDR>:/data /mnt
-
-# mount永続化
-# /etc/fstabに記述
-<IP_ADDR>:/data  /mnt/nfs  nfs  _netdev,nofail,x-systemd.automount  0  0
+NixOS flake configuration and modular network infrastructure for the RoDEP clubroom router, remote builder, and edge services host.
 
 ```
-
-## ブラウザからDriveにアクセス(/data)
-
-[filebrowser](http://router:8080/settings/profile)
-
-## 広告ブロック (AdGuard Home)
-
-LAN内のDNS問い合わせで広告・トラッカーを自動ブロックする `AdGuard Home` を稼働させています。
-
-### 管理画面 (Web UI)
-* **URL**: `http://192.168.50.1:3000` (または `http://<Tailscale_IP>:3000`)
-* **機能**:
-  * リアルタイムのクエリログ・ブロック状況の確認
-  * 誤検知されたサイトのホワイトリスト（許可）登録
-  * 広告ブロックフィルタの追加・管理
-
-## Web ファイルマネージャー (FileBrowser)
-
-NFSの共有フォルダ `/data` をブラウザから直接閲覧・アップロード・ダウンロードできる `FileBrowser` を稼働させています。
-
-### アクセス方法
-* **URL**: `http://192.168.50.1:8080` (または `http://<Tailscale_IP>:8080`)
-* **初期ログイン情報**:
-  * ユーザー名: `admin`
-  * パスワード: `admin`
-  * ※ 初回ログイン後、左側メニューの「Settings（設定）」からパスワード変更や部員用アカウントの追加が可能です。
-
-
-
-
-## 部内 Web サービス一覧 (リバースプロキシ)
-
-部室 LAN に接続しているデバイスのブラウザから、ポート番号不要でアクセス可能です：
-
-* 🌐 **NAS / ファイルマネージャー**: [http://nas.lan](http://nas.lan) (または [http://drive.lan](http://drive.lan) / [http://router.lan](http://router.lan))
-* 🛡️ **広告ブロック管理 (AdGuard Home)**: [http://adguard.lan](http://adguard.lan) (または [http://dns.lan](http://dns.lan))
-* 📊 **ハードウェア & ネットワーク監視 (Grafana)**: [http://grafana.lan](http://grafana.lan) (または [http://monitor.lan](http://monitor.lan) / [http://status.lan](http://status.lan))
-* ⚡ **分散コンパイル監視 (distcc Web)**: [http://distcc.lan](http://distcc.lan)
-
-## ⚡ 分散コンパイル & リモートビルダーの利用ガイド
-
-部員のノート PC（MacBook や Linux）のビルド処理を、部室ルーターの 8C/16T（i7-11800H）に肩代わりさせるための手順です。
+                   +------------------------------------+
+                   |   Upstream WiFi (Campus WAN)       |
+                   +-----------------+------------------+
+                                     | wlan0 (DHCP + MAC rotation)
+                         [ clubroom-router ]
+                                     | enp2s0 (192.168.50.1/24)
+                   +-----------------+------------------+
+                   |   Clubroom LAN (dnsmasq / BBR)     |
+                   +------------------------------------+
+```
 
 ---
 
-### 1. `distcc` による通常ビルドの分散化（ROS 2 / C++ / CMake / Make）
-> `flake.nix` の作成やプロジェクトファイルの変更は不要です。
+## Architecture & Modules
 
-#### ① クライアント PC に `distcc` をインストール
-* **Ubuntu / Debian**: `sudo apt install distcc`
-* **Arch Linux**: `sudo pacman -S distcc`
-* **macOS**: `brew install distcc`
+Modular NixOS configuration. Each module in `modules/` is decoupled with configurable options and exported via flakes for standalone reuse across other machines.
 
-#### ② ターミナルで環境変数を設定（`~/.bashrc` や `~/.zshrc` に追記推奨）
+```
+.
+├── flake.nix                  # Flake entrypoint & exported nixosModules
+├── configuration.nix          # Machine root configuration
+├── hardware-configuration.nix # Target hardware configuration
+├── Makefile                   # Deployment shortcuts
+├── scripts/
+│   └── connection-watchdog.sh # Log watcher & auto WAN IP recovery
+└── modules/
+    ├── default.nix            # Module aggregation
+    ├── wifi-as-wan.nix        # WiFi-as-WAN routing, DHCPRELEASE, MAC rotation
+    ├── router.nix             # Machine profile enabling host modules
+    ├── performance.nix        # Zen kernel, BBR + CAKE, sysctl, tmpfs
+    ├── proxy.nix              # Caddy reverse proxy (*.lan)
+    ├── monitoring.nix         # Prometheus + Node Exporter + Grafana
+    ├── services.nix           # NFS NAS, FileBrowser, Tailscale, Docker, Distccd
+    ├── runner.nix             # GitHub Actions self-hosted runner
+    └── system.nix             # Base system, users, nix-daemon optimization
+```
+
+---
+
+## Reusable Flake Modules
+
+Import modules into external flakes (`flake.nix`):
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    clubroom-router.url = "github:rodep-soft/clubroom-router-nixos";
+  };
+
+  outputs = { self, nixpkgs, clubroom-router, ... }: {
+    nixosConfigurations.my-router = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        # Import single module
+        clubroom-router.nixosModules.wifiAsWan
+
+        # Or import all modules and toggle via options
+        # clubroom-router.nixosModules.default
+
+        {
+          services.wifi-as-wan = {
+            enable = true;
+            externalInterface = "wlan0";
+            internalInterface = "eth0";
+            internalIp = "192.168.1.1";
+          };
+        }
+      ];
+    };
+  };
+}
+```
+
+Available exported modules:
+* `nixosModules.wifiAsWan` (`services.wifi-as-wan`)
+* `nixosModules.performance` (`profiles.performance`)
+* `nixosModules.proxy` (`services.clubroom-proxy`)
+* `nixosModules.monitoring` (`services.clubroom-monitoring`)
+* `nixosModules.services` (`services.clubroom-services`)
+* `nixosModules.runner` (`services.rodep-runner`)
+* `nixosModules.default` (imports all modules)
+
+---
+
+## Deployment
+
 ```bash
-# 部室 LAN 接続時（16スレッド並列指定）
+# Build and switch configuration
+make switch
+# or: sudo nixos-rebuild switch --flake .#nixos
+
+# Test without modifying bootloader
+make test
+
+# Update flake locks
+make update
+```
+
+---
+
+## WAN IP Rotation & Watchdog
+
+Upstream campus WiFi leases global IPs via DHCP. To rotate IP and avoid DHCP pool exhaustion, `renew-wan-ip` issues a clean `DHCPRELEASE` before restarting `iwd` with a randomized MAC.
+
+* **Automated Rotation**: Scheduled every 2 hours via `systemd.timers.rotate-wan-ip`.
+* **On-Demand Rotation**:
+  ```bash
+  renew-wan-ip
+  ```
+* **Auto-Recovery Watchdog**:
+  ```bash
+  ./scripts/connection-watchdog.sh
+  ```
+  Monitors client logs for rate limits (`429`, `used today.*free messages`) or connection drops, triggering `renew-wan-ip` automatically.
+
+---
+
+## Network Endpoints
+
+Accessible via LAN (`*.lan`) or Tailscale:
+
+| Service | LAN URL | Port | Backend |
+| :--- | :--- | :--- | :--- |
+| FileBrowser (NAS) | `http://nas.lan` | `8080` | `/data` Web GUI |
+| AdGuard Home | `http://adguard.lan` | `3000` | DNS Sinkhole & Upstream Cache |
+| Grafana Dashboard | `http://grafana.lan` | `3100` | System metrics & monitoring |
+| Prometheus | - | `9090` | Time-series metrics engine |
+| Distcc Status | `http://distcc.lan` | `3633` | Distributed compiler monitor |
+| Default HTTP Root | `http://router.lan` | `80` | Redirects to NAS |
+
+---
+
+## Distributed Compilation & Remote Builder
+
+Offload C/C++ (ROS 2 / CMake) builds to the router's 8C/16T CPU:
+
+### 1. distcc (ROS 2 / Make / CMake)
+
+Client setup (`~/.bashrc`):
+```bash
 export DISTCC_HOSTS="192.168.50.1/16"
-
-# ※ Tailscale 経由で自宅からビルドする場合は Tailscale IP または nixos を指定:
-# export DISTCC_HOSTS="<Tailscale-IP>/16"
-
-# コンパイラを distcc 経由に切り替え
 export CC="distcc gcc"
 export CXX="distcc g++"
 ```
 
-#### ③ いつも通りビルドを実行
+Compile with 16 parallel jobs:
 ```bash
-# ROS 2 の場合 (16並列で爆速ビルド)
 colcon build --parallel-workers 16
-
-# 通常の CMake / Make の場合
-make -j16
-# または cmake --build build -j16
+# or: make -j16
 ```
-* 📊 **リアルタイム分散状況の確認**: ブラウザで [http://distcc.lan](http://distcc.lan)（または `http://<Tailscale-IP>:3633`）を開くと、リアルタイムで各コンパイルジョブの分散状況が見えます。
 
----
+### 2. Nix Remote Builder
 
-### 2. Nix リモートビルダー（Nix / Flakes / macOS Apple Silicon 対応）
-> MacBook (M1/M2/M3) からでも Linux 用バイナリ・ROS 2・Docker コンテナをルーター上でビルド可能。
-
-#### ① 部員の SSH 公開鍵をルーターに登録
-ルーターの `/home/yano/.ssh/authorized_keys` に部員の公開鍵を追記。
-
-#### ② 部員の PC の `~/.config/nix/nix.conf` に設定を追加
+Add to client `~/.config/nix/nix.conf`:
 ```conf
 builders = ssh://yano@192.168.50.1 x86_64-linux - 16 1 kvm,benchmark,big-parallel
 ```
-*(Tailscale 経由の場合は `ssh://yano@nixos` または `ssh://yano@<Tailscale-IP>`)*
 
-#### ③ ビルドを実行
-```bash
-nix build
-# または
-nix develop
-```
-自動的にルーターへソースが送られ、ルーターの RAM ディスク上で並列ビルドされた完成品だけが手元に戻ってきます。
+Then invoke `nix build` or `nix develop` normally; derivations compile on the router's RAM disk.
 
 ---
 
-### 3. VS Code Remote SSH（GUI でコード編集 + ルーター側で実行）
-1. VS Code 拡張機能「**Remote - SSH**」をインストール。
-2. `ssh yano@192.168.50.1`（または Tailscale の `ssh yano@nixos`）に接続。
-3. ルーター内のプロジェクトフォルダを開くことで、快適にコードを書きつつ、16スレッドの爆速ビルドと実行を行えます。
+## NFS Storage Mount
 
----
-
----
-
-## Nix Flakes によるデプロイと運用
-
-本リポジトリは **Nix Flakes** および **モジュール分割** に対応しています。
-
-### ディレクトリ構成
-```
-.
-├── flake.nix                  # Flake定義エントリーポイント
-├── configuration.nix          # ホスト設定 (modules + hardware-configuration をインポート)
-├── hardware-configuration.nix # ハードウェア自動生成設定
-├── Makefile                   # 管理用ショートカットコマンド
-└── modules/                   # 機能ごとの分割モジュール
-    ├── default.nix            # モジュール一括インポート
-    ├── performance.nix        # 高性能カーネル(Zen)、BBR+CAKE、tmpfs、sysctlチューニング
-    ├── router.nix             # WiFi-as-WAN、AdGuard Home、Firewall設定
-    ├── proxy.nix              # Caddy リバースプロキシ (*.lan ローカルドメイン)
-    ├── monitoring.nix         # Prometheus + Node Exporter + Grafana 監視基盤
-    ├── services.nix           # Tailscale、NFS、FileBrowser、Docker、SSH
-    ├── runner.nix             # GitHub Actions Self-Hosted Runner (rodep-soft)
-    ├── system.nix             # ユーザー(yano)、パッケージ、自動GC、最適化
-    └── wifi-as-wan.nix        # WiFi as WAN モジュール定義
-```
-
-### 設定の反映 (Nix Flakes)
-リポジトリ内で以下を実行するだけで適用できます：
+Shared directory: `/data`
 
 ```bash
-# 設定をビルドして即時適用
-make switch
-# (または sudo nixos-rebuild switch --flake .#nixos)
+# Mount on client
+sudo mount -t nfs 192.168.50.1:/data /mnt
 
-# 再起動時にのみ反映させる場合
-make boot
-
-# Flake の依存関係（nixpkgs等）のアップデート
-make update
+# Persistent mount in /etc/fstab
+192.168.50.1:/data  /mnt/nfs  nfs  _netdev,nofail,x-systemd.automount  0  0
 ```

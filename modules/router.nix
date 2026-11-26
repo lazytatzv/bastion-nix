@@ -2,7 +2,7 @@
 
 {
   # ==========================================
-  # WiFi as WAN Router Module Configuration
+  # WiFi as WAN Router Module
   # ==========================================
   services.wifi-as-wan = {
     enable = true;
@@ -13,12 +13,12 @@
     autoDisableConflicts = true;
     rotateWanIp = {
       enable = true;
-      calendar = "*-*-* 00,02,04,06,08,10,12,14,16,18,20,22:00:00"; # Rotate WAN IP roughly 10-12 times a day (every 2 hours)
+      calendar = "*-*-* 00,02,04,06,08,10,12,14,16,18,20,22:00:00";
     };
   };
 
   # ==========================================
-  # AdGuard Home (DNS Ad Blocking & High-Speed DNS Cache)
+  # AdGuard Home (DNS & Local Records)
   # ==========================================
   services.adguardhome = {
     enable = true;
@@ -31,10 +31,9 @@
           "https://dns.quad9.net/dns-query"
           "https://cloudflare-dns.com/dns-query"
         ];
-        # High-Speed DNS Cache Settings
-        cache_size = 536870912;  # 512 MB RAM cache for instant DNS resolution
-        cache_ttl_min = 3600;    # Cache entries for at least 1 hour
-        cache_optimistic = true; # Return cached response immediately and refresh in background
+        cache_size = 536870912;
+        cache_ttl_min = 3600;
+        cache_optimistic = true;
       };
       filtering = {
         protection_enabled = true;
@@ -43,23 +42,44 @@
     };
   };
 
-  # Disable NetworkManager to prevent interference with router daemons
-  networking.networkmanager.enable = false;
-  networking.useNetworkd = true;
-  networking.useDHCP = false;
+  services.dnsmasq.settings = {
+    address = [
+      "/router/192.168.50.1"
+      "/lan/192.168.50.1"
+    ];
+  };
 
-  # Automatic DNS resolution for all *.lan domains to router IP (192.168.50.1)
-  services.dnsmasq.settings.address = [
-    "/lan/192.168.50.1"
-    "/router/192.168.50.1"
-  ];
+  # ==========================================
+  # Modular Feature Profiles
+  # ==========================================
+  # High-performance Zen kernel & sysctl tuning
+  profiles.performance.enable = true;
 
-  # Firewall Rules
-  networking.firewall = {
-    enable = true;
-    allowedTCPPorts = [ 22 80 443 2049 4000 4001 4002 8189 8000 8001 8889 8888 8554 3000 8080 ];
-    allowedUDPPorts = [ 53 67 68 2049 4000 4001 4002 8889 8888 8554 ];
-    checkReversePath = false;
-    allowPing = true;
+  # Local Caddy reverse proxy (*.lan)
+  services.clubroom-proxy.enable = true;
+
+  # Shared NAS, Tailscale, Docker & Distcc
+  services.clubroom-services.enable = true;
+
+  # Prometheus + Node Exporter + Grafana monitoring
+  services.clubroom-monitoring.enable = true;
+
+  # GitHub Actions self-hosted runner
+  services.rodep-runner.enable = true;
+
+  # ==========================================
+  # Host Network & Firewall Rules
+  # ==========================================
+  networking = {
+    useNetworkd = true;
+    useDHCP = false;
+    firewall = {
+      enable = true;
+      checkReversePath = false;
+      allowPing = true;
+      allowedTCPPorts = [ 22 80 443 2049 4000 4001 4002 8189 8000 8001 8889 8888 8554 3000 8080 ];
+      allowedUDPPorts = [ 53 67 68 2049 4000 4001 4002 8889 8888 8554 ];
+    };
+    networkmanager.enable = false;
   };
 }

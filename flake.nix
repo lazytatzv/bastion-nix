@@ -6,6 +6,19 @@
   };
 
   outputs = { self, nixpkgs, ... }@inputs: {
+    # Reusable NixOS Modules for import across external flakes / hosts
+    nixosModules = {
+      default = ./modules;
+      wifiAsWan = ./modules/wifi-as-wan.nix;
+      router = ./modules/router.nix;
+      performance = ./modules/performance.nix;
+      monitoring = ./modules/monitoring.nix;
+      proxy = ./modules/proxy.nix;
+      services = ./modules/services.nix;
+      runner = ./modules/runner.nix;
+      system = ./modules/system.nix;
+    };
+
     nixosConfigurations = {
       # Default hostname target (nixos)
       nixos = nixpkgs.lib.nixosSystem {

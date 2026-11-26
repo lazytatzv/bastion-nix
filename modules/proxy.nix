@@ -1,84 +1,88 @@
 { config, lib, pkgs, ... }:
 
-{
-  # ==========================================
-  # Caddy Reverse Proxy for Local Domains (*.lan)
-  # ==========================================
-  services.caddy = {
-    enable = true;
+with lib;
 
-    virtualHosts = {
-      # Router Default Landing / Shortcut
-      "http://router.lan" = {
-        extraConfig = ''
-          redir http://nas.lan{uri}
-        '';
-      };
+let
+  cfg = config.services.clubroom-proxy;
+in {
+  options.services.clubroom-proxy = {
+    enable = mkEnableOption "Caddy reverse proxy for local services (*.lan)";
 
-      # AdGuard Home Web UI (DNS Management & Ad Blocking)
-      "http://adguard.lan" = {
-        extraConfig = ''
-          reverse_proxy 127.0.0.1:3000
-        '';
-      };
-      "http://dns.lan" = {
-        extraConfig = ''
-          reverse_proxy 127.0.0.1:3000
-        '';
-      };
-
-      # FileBrowser (Web NAS / Data Manager)
-      "http://nas.lan" = {
-        extraConfig = ''
-          reverse_proxy 127.0.0.1:8080
-        '';
-      };
-      "http://drive.lan" = {
-        extraConfig = ''
-          reverse_proxy 127.0.0.1:8080
-        '';
-      };
-      "http://files.lan" = {
-        extraConfig = ''
-          reverse_proxy 127.0.0.1:8080
-        '';
-      };
-
-      # Grafana Metrics & System Monitoring Dashboard
-      "http://grafana.lan" = {
-        extraConfig = ''
-          reverse_proxy 127.0.0.1:3100
-        '';
-      };
-      "http://monitor.lan" = {
-        extraConfig = ''
-          reverse_proxy 127.0.0.1:3100
-        '';
-      };
-      "http://status.lan" = {
-        extraConfig = ''
-          reverse_proxy 127.0.0.1:3100
-        '';
-      };
-
-      # Distcc Web Status Monitor
-      "http://distcc.lan" = {
-        extraConfig = ''
-          reverse_proxy 127.0.0.1:3633
-        '';
-      };
-
-      # Tailscale / Hostname / Default HTTP Catch-All
-      # Accessing via Tailscale IP (http://100.x.y.z) or hostname (http://nixos)
-      # directly opens FileBrowser NAS on standard port 80
-      ":80" = {
-        extraConfig = ''
-          reverse_proxy 127.0.0.1:8080
-        '';
-      };
+    baseDomain = mkOption {
+      type = types.str;
+      default = "lan";
+      description = "Base local domain suffix.";
     };
   };
 
-  # Open HTTP (80) and HTTPS (443) on the firewall
-  networking.firewall.allowedTCPPorts = [ 80 443 ];
+  config = mkIf cfg.enable {
+    services.caddy = {
+      enable = true;
+
+      virtualHosts = {
+        "http://router.${cfg.baseDomain}" = {
+          extraConfig = ''
+            redir http://nas.${cfg.baseDomain}{uri}
+          '';
+        };
+
+        "http://adguard.${cfg.baseDomain}" = {
+          extraConfig = ''
+            reverse_proxy 127.0.0.1:3000
+          '';
+        };
+        "http://dns.${cfg.baseDomain}" = {
+          extraConfig = ''
+            reverse_proxy 127.0.0.1:3000
+          '';
+        };
+
+        "http://nas.${cfg.baseDomain}" = {
+          extraConfig = ''
+            reverse_proxy 127.0.0.1:8080
+          '';
+        };
+        "http://drive.${cfg.baseDomain}" = {
+          extraConfig = ''
+            reverse_proxy 127.0.0.1:8080
+          '';
+        };
+        "http://files.${cfg.baseDomain}" = {
+          extraConfig = ''
+            reverse_proxy 127.0.0.1:8080
+          '';
+        };
+
+        "http://grafana.${cfg.baseDomain}" = {
+          extraConfig = ''
+            reverse_proxy 127.0.0.1:3100
+          '';
+        };
+        "http://monitor.${cfg.baseDomain}" = {
+          extraConfig = ''
+            reverse_proxy 127.0.0.1:3100
+          '';
+        };
+        "http://status.${cfg.baseDomain}" = {
+          extraConfig = ''
+            reverse_proxy 127.0.0.1:3100
+          '';
+        };
+
+        "http://distcc.${cfg.baseDomain}" = {
+          extraConfig = ''
+            reverse_proxy 127.0.0.1:3633
+          '';
+        };
+
+        ":80" = {
+          extraConfig = ''
+            reverse_proxy 127.0.0.1:8080
+          '';
+        };
+      };
+    };
+
+    networking.firewall.allowedTCPPorts = [ 80 443 ];
+  };
 }
