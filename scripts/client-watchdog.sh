@@ -15,6 +15,9 @@ WATCH_DIR="${WATCH_DIR:-${HOME}/.local/share/opencode/log}"
 PATTERN="${PATTERN:-used today.*free messages|429|rate[- ]?limit|quota[- ]?exceeded|resource_exhausted}"
 MAX_DAILY_RECOVERIES="${MAX_DAILY_RECOVERIES:-10}"
 STATE_FILE="${STATE_FILE:-/tmp/opencode-client-watchdog.state}"
+TMUX_TARGET="${TMUX_TARGET:-opencode}"
+TMUX_AUTO_RETRY="${TMUX_AUTO_RETRY:-true}"
+TMUX_KEY="${TMUX_KEY:-Enter}"
 
 echo "=========================================================="
 echo " OpenCode Client Watchdog -> Bastion Router (${ROUTER_HOST})"
@@ -22,6 +25,7 @@ echo "=========================================================="
 echo "Target Log Directory : ${WATCH_DIR}"
 echo "Daily Recovery Cap   : ${MAX_DAILY_RECOVERIES} times / day"
 echo "Router Target        : ${ROUTER_USER}@${ROUTER_HOST}"
+echo "tmux Auto-Retry      : ${TMUX_AUTO_RETRY} (target: '${TMUX_TARGET}', key: '${TMUX_KEY}')"
 echo ""
 
 get_daily_count() {
@@ -84,6 +88,15 @@ while true; do
           echo "[watchdog] WAN IP successfully rotated! (${new_count}/${MAX_DAILY_RECOVERIES} today)."
           notify-send -u normal "OpenCode Watchdog" "WAN IP更新完了 (${new_count}/${MAX_DAILY_RECOVERIES}回目)。制限が解除されました。" 2>/dev/null || true
           printf '\a' # Beep
+
+          # Auto-send retry key to tmux session if running
+          if [ "${TMUX_AUTO_RETRY}" = "true" ] && command -v tmux >/dev/null 2>&1; then
+            if tmux has-session -t "${TMUX_TARGET}" 2>/dev/null; then
+              echo "[watchdog] Auto-retry: Sending '${TMUX_KEY}' to tmux session '${TMUX_TARGET}'..."
+              sleep 2
+              tmux send-keys -t "${TMUX_TARGET}" "${TMUX_KEY}"
+            fi
+          fi
         else
           echo "[watchdog] [ERROR] Failed to execute renew-wan-ip on router via SSH."
           notify-send -u critical "OpenCode Watchdog" "ルーターへのSSH接続またはIP更新に失敗しました。" 2>/dev/null || true
