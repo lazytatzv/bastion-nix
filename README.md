@@ -28,7 +28,7 @@ Modular NixOS configuration. Each module in `modules/` is decoupled with configu
 ├── hardware-configuration.nix # Target hardware configuration
 ├── Makefile                   # Deployment shortcuts
 ├── scripts/
-│   └── connection-watchdog.sh # Log watcher & auto WAN IP recovery
+│   └── client-watchdog.sh     # Client PC watcher: triggers remote renew-wan-ip via SSH
 └── modules/
     ├── default.nix            # Module aggregation
     ├── wifi-as-wan.nix        # WiFi-as-WAN routing, DHCPRELEASE, MAC rotation
@@ -109,16 +109,16 @@ make update
 
 Upstream campus WiFi leases global IPs via DHCP. To rotate IP and avoid DHCP pool exhaustion, `renew-wan-ip` issues a clean `DHCPRELEASE` before restarting `iwd` with a randomized MAC.
 
-* **Automated Rotation**: Scheduled every 2 hours via `systemd.timers.rotate-wan-ip`.
+* **Automated Periodic Rotation**: Daily at 04:00 AM via `systemd.timers.rotate-wan-ip` (stealth & session refresh).
 * **On-Demand Rotation**:
   ```bash
   renew-wan-ip
   ```
-* **Auto-Recovery Watchdog**:
+* **Client Auto-Recovery Watchdog (Run on your Linux client machine)**:
   ```bash
-  ./scripts/connection-watchdog.sh
+  # Monitors local OpenCode logs; triggers remote renewal on router via SSH
+  ./scripts/client-watchdog.sh
   ```
-  Monitors client logs for rate limits (`429`, `used today.*free messages`) or connection drops, triggering `renew-wan-ip` automatically.
 
 ---
 

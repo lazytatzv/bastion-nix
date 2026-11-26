@@ -90,6 +90,11 @@ in {
         default = "*-*-* 04:00:00";
         description = "systemd OnCalendar specification for periodic WAN IP rotation (e.g. daily at 04:00).";
       };
+      randomizedDelaySec = mkOption {
+        type = types.str;
+        default = "1800";
+        description = "Random jitter delay (in seconds or systemd time like '30m') to prevent detection of scheduled execution.";
+      };
     };
   };
 
@@ -274,6 +279,7 @@ in {
       wantedBy = [ "timers.target" ];
       timerConfig = {
         OnCalendar = cfg.rotateWanIp.calendar;
+        RandomizedDelaySec = cfg.rotateWanIp.randomizedDelaySec;
         Persistent = true;
       };
     };

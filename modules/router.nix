@@ -13,7 +13,7 @@
     autoDisableConflicts = true;
     rotateWanIp = {
       enable = true;
-      calendar = "*-*-* 00,02,04,06,08,10,12,14,16,18,20,22:00:00";
+      calendar = "*-*-* 04:00:00"; # Rotate WAN IP daily at 04:00 AM
     };
   };
 
@@ -65,7 +65,10 @@
   services.clubroom-monitoring.enable = true;
 
   # GitHub Actions self-hosted runner
-  services.bastion-runner.enable = true;
+  services.bastion-runner = {
+    enable = true;
+    url = "https://github.com/rodep-soft/abu2027-br-pc";
+  };
 
   # ==========================================
   # Host Network & Firewall Rules

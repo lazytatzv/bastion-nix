@@ -65,6 +65,9 @@
     shell = pkgs.bash;
   };
 
+  # Allow wheel members to run sudo without password (for remote recovery scripts & automation)
+  security.sudo.wheelNeedsPassword = false;
+
   # Essential System Packages
   environment.systemPackages = with pkgs; [
     vim

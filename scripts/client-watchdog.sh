@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# OpenCode Client Watchdog & Remote WAN Auto-Recovery
+# ==============================================================================
+# Run this script on your Linux client PC where OpenCode runs.
+# It watches local OpenCode logs for quota limits or rate-limiting (429),
+# and remotely triggers `renew-wan-ip` on the bastion router via SSH.
+# ==============================================================================
+
+set -euo pipefail
+
+ROUTER_HOST="${ROUTER_HOST:-192.168.50.1}"
+ROUTER_USER="${ROUTER_USER:-yano}"
+WATCH_DIR="${WATCH_DIR:-${HOME}/.local/share/opencode/log}"
+PATTERN="${PATTERN:-used today.*free messages|429|rate[- ]?limit|quota[- ]?exceeded|resource_exhausted}"
+MAX_DAILY_RECOVERIES="${MAX_DAILY_RECOVERIES:-10}"
+STATE_FILE="${STATE_FILE:-/tmp/opencode-client-watchdog.state}"
+
+echo "=========================================================="
+echo " OpenCode Client Watchdog -> Bastion Router (${ROUTER_HOST})"
+echo "=========================================================="
+echo "Target Log Directory : ${WATCH_DIR}"
+echo "Daily Recovery Cap   : ${MAX_DAILY_RECOVERIES} times / day"
+echo "Router Target        : ${ROUTER_USER}@${ROUTER_HOST}"
+echo ""
+
+get_daily_count() {
+  local today
+  today=$(date +%F)
+  if [ -f "${STATE_FILE}" ]; then
+    local saved_date saved_count
+    read -r saved_date saved_count < "${STATE_FILE}" 2>/dev/null || true
+    if [ "${saved_date:-}" = "${today}" ]; then
+      echo "${saved_count:-0}"
+      return
+    fi
+  fi
+  echo "0"
+}
+
+set_daily_count() {
+  local count="$1"
+  local today
+  today=$(date +%F)
+  echo "${today} ${count}" > "${STATE_FILE}" 2>/dev/null || true
+}
+
+# Wait until target directory exists
+if [ ! -d "${WATCH_DIR}" ]; then
+  echo "[watchdog] Waiting for log directory to appear: ${WATCH_DIR}"
+  while [ ! -d "${WATCH_DIR}" ]; do
+    sleep 3
+  done
+fi
+
+echo "[watchdog] Active. Monitoring logs for rate limits..."
+
+while true; do
+  LATEST_LOG=$(ls -t "${WATCH_DIR}"/*.log 2>/dev/null | head -n 1 || true)
+
+  if [ -n "${LATEST_LOG}" ] && [ -f "${LATEST_LOG}" ]; then
+    while IFS= read -r line; do
+      if echo "$line" | grep -qiE "${PATTERN}"; then
+        echo ""
+        current_count=$(get_daily_count)
+
+        if [ "${current_count}" -ge "${MAX_DAILY_RECOVERIES}" ]; then
+          echo "[watchdog] [SAFETY CAP] Daily limit reached (${current_count}/${MAX_DAILY_RECOVERIES})."
+          echo "[watchdog] Halting auto-recovery for today to avoid DHCP/MAC abuse."
+          notify-send -u critical "OpenCode Watchdog" "1日の自動復旧上限（${MAX_DAILY_RECOVERIES}回）に達しました。本日の自動IP更新を停止します。" 2>/dev/null || true
+          sleep 60
+          break
+        fi
+
+        echo "[watchdog] Rate limit detected in OpenCode log!"
+        echo "[watchdog] Triggering remote WAN IP renewal on router (${ROUTER_HOST})..."
+        notify-send "OpenCode Watchdog" "制限検知: ルーターのWAN IPローテーションを開始します..." 2>/dev/null || true
+
+        # Trigger remote renewal via SSH
+        if ssh -o BatchMode=yes -o ConnectTimeout=5 "${ROUTER_USER}@${ROUTER_HOST}" "renew-wan-ip"; then
+          new_count=$((current_count + 1))
+          set_daily_count "${new_count}"
+
+          echo "[watchdog] WAN IP successfully rotated! (${new_count}/${MAX_DAILY_RECOVERIES} today)."
+          notify-send -u normal "OpenCode Watchdog" "WAN IP更新完了 (${new_count}/${MAX_DAILY_RECOVERIES}回目)。制限が解除されました。" 2>/dev/null || true
+          printf '\a' # Beep
+        else
+          echo "[watchdog] [ERROR] Failed to execute renew-wan-ip on router via SSH."
+          notify-send -u critical "OpenCode Watchdog" "ルーターへのSSH接続またはIP更新に失敗しました。" 2>/dev/null || true
+        fi
+
+        # Cooldown period before resuming log monitoring
+        echo "[watchdog] Cooling down for 20 seconds..."
+        sleep 20
+        break
+      fi
+    done < <(tail -fn0 "${LATEST_LOG}" 2>/dev/null)
+  fi
+
+  sleep 3
+done
