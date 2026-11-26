@@ -49,6 +49,58 @@ set_daily_count() {
   echo "${today} ${count}" > "${STATE_FILE}" 2>/dev/null || true
 }
 
+# ==============================================================================
+# Startup connectivity check
+# ==============================================================================
+echo "[watchdog] --- Startup Check ---"
+ALL_OK=true
+
+# 1. SSH connection to router
+if ssh -o BatchMode=yes -o ConnectTimeout=5 "${ROUTER_USER}@${ROUTER_HOST}" "exit" 2>/dev/null; then
+  echo "[watchdog] SSH connection to router .............. OK ✓"
+else
+  echo "[watchdog] SSH connection to router .............. FAIL ✗"
+  echo "[watchdog]   → ssh-copy-id ${ROUTER_USER}@${ROUTER_HOST} を実行してSSH鍵を登録してください"
+  ALL_OK=false
+fi
+
+# 2. renew-wan-ip command exists on router
+if ssh -o BatchMode=yes -o ConnectTimeout=5 "${ROUTER_USER}@${ROUTER_HOST}" "command -v renew-wan-ip" 2>/dev/null; then
+  echo "[watchdog] renew-wan-ip on router ................ OK ✓"
+else
+  echo "[watchdog] renew-wan-ip on router ................ FAIL ✗"
+  echo "[watchdog]   → ルーターで make switch が完了しているか確認してください"
+  ALL_OK=false
+fi
+
+# 3. tmux session check
+if [ "${TMUX_AUTO_RETRY}" = "true" ]; then
+  if command -v tmux >/dev/null 2>&1 && tmux has-session -t "${TMUX_TARGET}" 2>/dev/null; then
+    echo "[watchdog] tmux session '${TMUX_TARGET}' .............. OK ✓"
+  else
+    echo "[watchdog] tmux session '${TMUX_TARGET}' .............. WARN ⚠"
+    echo "[watchdog]   → tmux new -s ${TMUX_TARGET} でOpenCodeを起動するとAuto-Retryが有効になります"
+    echo "[watchdog]   → セッションがなければ制限検知後のEnter自動送信はスキップされます"
+  fi
+fi
+
+# 4. OpenCode log directory check
+if [ -d "${WATCH_DIR}" ]; then
+  echo "[watchdog] OpenCode log directory ................ OK ✓"
+else
+  echo "[watchdog] OpenCode log directory ................ WARN ⚠"
+  echo "[watchdog]   → ${WATCH_DIR} がまだ存在しません。OpenCodeを起動すると自動検出されます"
+fi
+
+echo "[watchdog] ----------------------"
+if [ "${ALL_OK}" = "true" ]; then
+  echo "[watchdog] All systems ready! 🚀"
+else
+  echo "[watchdog] Some checks failed. 上記を確認してから再起動することをおすすめします。"
+  echo "[watchdog] （このまま続行することも可能です）"
+fi
+echo ""
+
 # Wait until target directory exists
 if [ ! -d "${WATCH_DIR}" ]; then
   echo "[watchdog] Waiting for log directory to appear: ${WATCH_DIR}"
