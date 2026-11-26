@@ -197,7 +197,7 @@ in {
       nameserver 127.0.0.1
     '');
 
-    # External interface (WAN) - DHCP from upstream WiFi (e.g. school network)
+    # External interface (WAN) - DHCP from upstream WiFi
     # iwd handles WiFi association; networkd handles IP config after association.
     systemd.network.networks."10-wan" = {
       matchConfig.Name = cfg.externalInterface;

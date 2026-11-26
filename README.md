@@ -107,11 +107,11 @@ make update
 
 ## WAN IP Rotation & Client Watchdog
 
-Upstream campus WiFi leases global IPs via DHCP. To rotate the IP without exhausting the DHCP pool, `renew-wan-ip` issues a clean `DHCPRELEASE`, restarts `iwd` with a randomized MAC address, then waits until internet connectivity is confirmed via ping before returning.
+Upstream WiFi leases global IPs via DHCP. To rotate the IP without exhausting the DHCP pool, `renew-wan-ip` issues a clean `DHCPRELEASE`, restarts `iwd` with a randomized MAC address, then waits until internet connectivity is confirmed via ping before returning.
 
 ### Automated Periodic Rotation (Router-side)
 
-A randomized daily rotation runs at 04:00 AM ± 30 min (via `RandomizedDelaySec`) to prevent pattern detection by the campus network.
+A randomized daily rotation runs at 04:00 AM ± 30 min (via `RandomizedDelaySec`) to prevent pattern detection by upstream network monitoring.
 
 ```bash
 # Check the timer status on the router
