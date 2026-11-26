@@ -118,44 +118,50 @@ while true; do
     while IFS= read -r line; do
       if echo "$line" | grep -qiE "${PATTERN}"; then
         echo ""
-        current_count=$(get_daily_count)
+        recovery_ready=false
 
-        if [ "${current_count}" -ge "${MAX_DAILY_RECOVERIES}" ]; then
-          echo "[watchdog] [SAFETY CAP] Daily limit reached (${current_count}/${MAX_DAILY_RECOVERIES})."
-          echo "[watchdog] Halting auto-recovery for today to avoid excessive DHCP/MAC churn."
-          notify-send -u critical "OpenCode Watchdog" "1日の自動復旧上限（${MAX_DAILY_RECOVERIES}回）に達しました。本日の自動IP更新を停止します。" 2>/dev/null || true
-          sleep 60
-          break
+        if echo "$line" | grep -qiE 'connection lost due to|ECONNRESET'; then
+          echo "[watchdog] Connection error detected; skipping WAN IP renewal."
+          notify-send "OpenCode Watchdog" "通信エラーを検知しました。IP更新なしで再試行します。" 2>/dev/null || true
+          recovery_ready=true
+        else
+          current_count=$(get_daily_count)
+
+          if [ "${current_count}" -ge "${MAX_DAILY_RECOVERIES}" ]; then
+            echo "[watchdog] [SAFETY CAP] Daily limit reached (${current_count}/${MAX_DAILY_RECOVERIES})."
+            echo "[watchdog] Halting auto-recovery for today to avoid excessive DHCP/MAC churn."
+            notify-send -u critical "OpenCode Watchdog" "1日の自動復旧上限（${MAX_DAILY_RECOVERIES}回）に達しました。本日の自動IP更新を停止します。" 2>/dev/null || true
+            sleep 60
+            break
+          fi
+
+          echo "[watchdog] Rate-limit/quota response detected; renewing WAN IP on router (${ROUTER_HOST})..."
+          notify-send "OpenCode Watchdog" "利用制限を検知: ルーターのWAN IP更新を開始します..." 2>/dev/null || true
+
+          if ssh -o BatchMode=yes -o ConnectTimeout=5 "${ROUTER_USER}@${ROUTER_HOST}" "renew-wan-ip"; then
+            new_count=$((current_count + 1))
+            set_daily_count "${new_count}"
+
+            echo "[watchdog] WAN IP successfully renewed! (${new_count}/${MAX_DAILY_RECOVERIES} today)."
+            notify-send -u normal "OpenCode Watchdog" "WAN IP更新完了 (${new_count}/${MAX_DAILY_RECOVERIES}回目)。接続が復旧しました。" 2>/dev/null || true
+            printf '\a' # Beep
+            recovery_ready=true
+          else
+            echo "[watchdog] [ERROR] Failed to execute renew-wan-ip on router via SSH."
+            notify-send -u critical "OpenCode Watchdog" "ルーターへのSSH接続またはIP更新に失敗しました。" 2>/dev/null || true
+          fi
         fi
 
-        echo "[watchdog] Rate-limit/quota response detected in OpenCode log!"
-        echo "[watchdog] Triggering remote WAN IP renewal on router (${ROUTER_HOST})..."
-        notify-send "OpenCode Watchdog" "レート制限を検知: ルーターのWAN IP更新を開始します..." 2>/dev/null || true
-
-        # Trigger remote renewal via SSH
-        if ssh -o BatchMode=yes -o ConnectTimeout=5 "${ROUTER_USER}@${ROUTER_HOST}" "renew-wan-ip"; then
-          new_count=$((current_count + 1))
-          set_daily_count "${new_count}"
-
-          echo "[watchdog] WAN IP successfully renewed! (${new_count}/${MAX_DAILY_RECOVERIES} today)."
-          notify-send -u normal "OpenCode Watchdog" "WAN IP更新完了 (${new_count}/${MAX_DAILY_RECOVERIES}回目)。接続が復旧しました。" 2>/dev/null || true
-          printf '\a' # Beep
-
-          # Interrupt the current response, then ask OpenCode to retry.
-          if [ "${TMUX_AUTO_RETRY}" = "true" ] && command -v tmux >/dev/null 2>&1; then
-            if tmux has-session -t "${TMUX_TARGET}" 2>/dev/null; then
-              echo "[watchdog] Auto-retry: Interrupting and sending retry prompt to tmux session '${TMUX_TARGET}'..."
-              sleep 2
-              tmux send-keys -t "${TMUX_TARGET}" Escape Escape
-              sleep 0.5
-              tmux send-keys -l -t "${TMUX_TARGET}" "${TMUX_RETRY_PROMPT}"
-              sleep 0.5
-              tmux send-keys -t "${TMUX_TARGET}" Enter
-            fi
+        if [ "${recovery_ready}" = "true" ] && [ "${TMUX_AUTO_RETRY}" = "true" ] && command -v tmux >/dev/null 2>&1; then
+          if tmux has-session -t "${TMUX_TARGET}" 2>/dev/null; then
+            echo "[watchdog] Auto-retry: Interrupting and sending retry prompt to tmux session '${TMUX_TARGET}'..."
+            sleep 2
+            tmux send-keys -t "${TMUX_TARGET}" Escape Escape
+            sleep 0.5
+            tmux send-keys -l -t "${TMUX_TARGET}" "${TMUX_RETRY_PROMPT}"
+            sleep 0.5
+            tmux send-keys -t "${TMUX_TARGET}" Enter
           fi
-        else
-          echo "[watchdog] [ERROR] Failed to execute renew-wan-ip on router via SSH."
-          notify-send -u critical "OpenCode Watchdog" "ルーターへのSSH接続またはIP更新に失敗しました。" 2>/dev/null || true
         fi
 
         # Cooldown period before resuming log monitoring

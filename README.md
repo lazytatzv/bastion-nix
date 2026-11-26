@@ -126,7 +126,7 @@ renew-wan-ip
 `scripts/client-watchdog.sh` runs on your **client Linux machine** (the one running OpenCode).
 It watches local OpenCode logs for rate-limit/quota responses (`429`, `resource_exhausted`, `used today`, etc.), then SSH-triggers `renew-wan-ip` on the router.
 
-**After the WAN connection is restored, it can send `r` and `Enter` to your tmux session** so OpenCode retries without manual input.
+For `ECONNRESET` or `Connection lost due to` errors, it skips WAN renewal and retries OpenCode. For rate-limit/quota errors, it renews the WAN IP first, then retries.
 
 #### Setup (one-time)
 
@@ -162,13 +162,12 @@ On startup, the watchdog runs a self-check and prints:
 [watchdog] All systems ready! 🚀
 ```
 
-#### What happens when a rate-limit response is detected
+#### What happens when an error is detected
 
-1. Watchdog finds the rate-limit/quota message in the OpenCode log
-2. SSH-triggers `renew-wan-ip` on the router
-3. Router sends `DHCPRELEASE`, reconnects with a randomized MAC, and waits until `ping 1.1.1.1` succeeds
-4. Watchdog sends `r` and `Enter` to the `opencode` tmux session
-5. OpenCode retries — no manual input needed
+1. Watchdog detects an error in the OpenCode log
+2. For `ECONNRESET` or `Connection lost due to`, it skips WAN renewal. For rate-limit/quota errors, it SSH-triggers `renew-wan-ip` on the router.
+3. If renewed, the router reconnects with a randomized MAC and waits for internet connectivity.
+4. Watchdog sends `Escape` twice, types the retry prompt, and presses `Enter` in the `opencode` tmux session.
 
 #### Configuration via environment variables
 
@@ -177,8 +176,8 @@ On startup, the watchdog runs a self-check and prints:
 | `ROUTER_HOST` | `192.168.50.1` | Router LAN IP |
 | `ROUTER_USER` | `yano` | SSH user on the router |
 | `TMUX_TARGET` | `opencode` | tmux session name where OpenCode runs |
-| `TMUX_AUTO_RETRY` | `true` | Auto-send Enter to tmux after recovery |
-| `TMUX_KEYS` | `r Enter` | Keys sent to the tmux session (space-separated) |
+| `TMUX_AUTO_RETRY` | `true` | Automatically interrupt and retry in tmux after recovery |
+| `TMUX_RETRY_PROMPT` | `Please retry the previous request.` | Prompt sent to OpenCode after interrupting |
 | `MAX_DAILY_RECOVERIES` | `10` | Safety cap: max auto-recoveries per day |
 | `WATCH_DIR` | `~/.local/share/opencode/log` | OpenCode log directory to monitor |
 
