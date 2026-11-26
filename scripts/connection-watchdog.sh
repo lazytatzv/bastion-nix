@@ -15,7 +15,7 @@ set -euo pipefail
 
 WATCH_DIR="${WATCH_DIR:-${HOME}/.local/share/opencode/log}"
 PATTERN="${PATTERN:-used today.*free messages|429|rate[- ]?limit|quota[- ]?exceeded|resource_exhausted}"
-MAX_DAILY_RECOVERIES="${MAX_DAILY_RECOVERIES:-5}"
+MAX_DAILY_RECOVERIES="${MAX_DAILY_RECOVERIES:-10}"
 STATE_FILE="${STATE_FILE:-/tmp/connection-watchdog.state}"
 
 echo "=== Network Connection Watchdog Started ==="
