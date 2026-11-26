@@ -105,20 +105,99 @@ make update
 
 ---
 
-## WAN IP Rotation & Watchdog
+## WAN IP Rotation & Client Watchdog
 
-Upstream campus WiFi leases global IPs via DHCP. To rotate IP and avoid DHCP pool exhaustion, `renew-wan-ip` issues a clean `DHCPRELEASE` before restarting `iwd` with a randomized MAC.
+Upstream campus WiFi leases global IPs via DHCP. To rotate the IP without exhausting the DHCP pool, `renew-wan-ip` issues a clean `DHCPRELEASE`, restarts `iwd` with a randomized MAC address, then waits until internet connectivity is confirmed via ping before returning.
 
-* **Automated Periodic Rotation**: Daily at 04:00 AM via `systemd.timers.rotate-wan-ip` (stealth & session refresh).
-* **On-Demand Rotation**:
-  ```bash
-  renew-wan-ip
-  ```
-* **Client Auto-Recovery Watchdog (Run on your Linux client machine)**:
-  ```bash
-  # Monitors local OpenCode logs; triggers remote renewal on router via SSH
-  ./scripts/client-watchdog.sh
-  ```
+### Automated Periodic Rotation (Router-side)
+
+A randomized daily rotation runs at 04:00 AM ± 30 min (via `RandomizedDelaySec`) to prevent pattern detection by the campus network.
+
+```bash
+# Check the timer status on the router
+systemctl list-timers rotate-wan-ip
+
+# Trigger manually on the router
+renew-wan-ip
+```
+
+### Client Watchdog (Run on your Linux PC)
+
+`scripts/client-watchdog.sh` runs on your **client Linux machine** (the one running OpenCode).
+It watches local OpenCode logs for rate-limit signals (`429`, `resource_exhausted`, `used today`, etc.), then SSH-triggers `renew-wan-ip` on the router automatically.
+
+**After IP rotation succeeds, it also sends `Enter` to your tmux session** so OpenCode retries without any human intervention.
+
+#### Setup (one-time)
+
+**Step 1 — Register your SSH key on the router** (from your client PC):
+```bash
+ssh-copy-id yano@192.168.50.1
+```
+
+**Step 2 — Copy the watchdog script to your client PC**:
+```bash
+scp yano@192.168.50.1:/etc/nixos/scripts/client-watchdog.sh .
+chmod +x client-watchdog.sh
+```
+
+**Step 3 — Start OpenCode inside a named tmux session**:
+```bash
+tmux new -s opencode
+# (inside the session)
+opencode
+```
+
+**Step 4 — Run the watchdog in another terminal or tmux pane**:
+```bash
+./client-watchdog.sh
+```
+
+On startup, the watchdog runs a self-check and prints:
+```
+[watchdog] SSH connection to router .............. OK ✓
+[watchdog] renew-wan-ip on router ................ OK ✓
+[watchdog] tmux session 'opencode' ............... OK ✓
+[watchdog] OpenCode log directory ................ OK ✓
+[watchdog] All systems ready! 🚀
+```
+
+#### What happens when a rate limit is hit
+
+1. Watchdog detects the limit signal in the OpenCode log
+2. SSH-triggers `renew-wan-ip` on the router
+3. Router sends `DHCPRELEASE`, rotates MAC, reconnects, and waits until `ping 1.1.1.1` succeeds
+4. Watchdog sends `Enter` to the `opencode` tmux session
+5. OpenCode retries — fully automatic, no human input needed
+
+#### Configuration via environment variables
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `ROUTER_HOST` | `192.168.50.1` | Router LAN IP |
+| `ROUTER_USER` | `yano` | SSH user on the router |
+| `TMUX_TARGET` | `opencode` | tmux session name where OpenCode runs |
+| `TMUX_AUTO_RETRY` | `true` | Auto-send Enter to tmux after recovery |
+| `TMUX_KEY` | `Enter` | Key sent to the tmux session |
+| `MAX_DAILY_RECOVERIES` | `10` | Safety cap: max auto-recoveries per day |
+| `WATCH_DIR` | `~/.local/share/opencode/log` | OpenCode log directory to monitor |
+
+```bash
+# Example: custom session name and higher daily cap
+TMUX_TARGET=mywork MAX_DAILY_RECOVERIES=20 ./client-watchdog.sh
+```
+
+#### Manual on-demand IP rotation (from your client PC)
+
+Add this alias to your `~/.bashrc` or `~/.zshrc`:
+```bash
+alias renew-ip="ssh yano@192.168.50.1 renew-wan-ip"
+```
+
+Then just run:
+```bash
+renew-ip
+```
 
 ---
 
