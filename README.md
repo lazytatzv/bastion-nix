@@ -1,17 +1,17 @@
 # bastion-nix
 
-Autonomous Fortress Router & Edge Compute Citadel for Clubroom LAN.
-Hardened defense, stealth WAN rotation, distributed build artillery, and local edge services.
+NixOS router and edge compute node for a clubroom LAN.
+Includes WiFi-as-WAN routing, periodic DHCP lease renewal, distributed builds, and local services.
 
 ```
                    +------------------------------------+
                    |   Upstream WiFi (Campus WAN)       |
                    +-----------------+------------------+
-                                     | wlan0 (Stealth DHCP / Auto-Release)
+                                     | wlan0 (DHCP / Auto-Release)
                               [ bastion-nix ]
                                      | enp2s0 (192.168.50.1/24)
                    +-----------------+------------------+
-                   |   Clubroom Fortress LAN (BBR/CAKE) |
+                   |   Clubroom LAN (BBR/CAKE)          |
                    +------------------------------------+
 ```
 
@@ -31,7 +31,7 @@ Modular NixOS configuration. Each module in `modules/` is decoupled with configu
 │   └── client-watchdog.sh     # Client PC watcher: triggers remote renew-wan-ip via SSH
 └── modules/
     ├── default.nix            # Module aggregation
-    ├── wifi-as-wan.nix        # WiFi-as-WAN routing, DHCPRELEASE, MAC rotation
+    ├── wifi-as-wan.nix        # WiFi-as-WAN routing, DHCP release, MAC randomization
     ├── router.nix             # Machine profile enabling host modules
     ├── performance.nix        # Zen kernel, BBR + CAKE, sysctl, tmpfs
     ├── proxy.nix              # Caddy reverse proxy (*.lan)
@@ -105,13 +105,13 @@ make update
 
 ---
 
-## WAN IP Rotation & Client Watchdog
+## WAN Lease Renewal & Client Watchdog
 
-Upstream WiFi leases global IPs via DHCP. To rotate the IP without exhausting the DHCP pool, `renew-wan-ip` issues a clean `DHCPRELEASE`, restarts `iwd` with a randomized MAC address, then waits until internet connectivity is confirmed via ping before returning.
+Upstream WiFi leases global IPs via DHCP. To obtain a new lease without exhausting the DHCP pool, `renew-wan-ip` issues a clean `DHCPRELEASE`, restarts `iwd` with a randomized MAC address, then waits until internet connectivity is confirmed via ping before returning.
 
-### Automated Periodic Rotation (Router-side)
+### Automated Periodic Renewal (Router-side)
 
-A randomized daily rotation runs at 04:00 AM ± 30 min (via `RandomizedDelaySec`) to prevent pattern detection by upstream network monitoring.
+A daily renewal runs at 04:00 with up to 30 minutes of random jitter (`RandomizedDelaySec`), so the reconnect does not happen at exactly the same time every day.
 
 ```bash
 # Check the timer status on the router
@@ -124,9 +124,9 @@ renew-wan-ip
 ### Client Watchdog (Run on your Linux PC)
 
 `scripts/client-watchdog.sh` runs on your **client Linux machine** (the one running OpenCode).
-It watches local OpenCode logs for rate-limit signals (`429`, `resource_exhausted`, `used today`, etc.), then SSH-triggers `renew-wan-ip` on the router automatically.
+It watches local OpenCode logs for rate-limit/quota responses (`429`, `resource_exhausted`, `used today`, etc.), then SSH-triggers `renew-wan-ip` on the router.
 
-**After IP rotation succeeds, it also sends `Enter` to your tmux session** so OpenCode retries without any human intervention.
+**After the WAN connection is restored, it can send `Enter` to your tmux session** so OpenCode retries without manual input.
 
 #### Setup (one-time)
 
@@ -162,13 +162,13 @@ On startup, the watchdog runs a self-check and prints:
 [watchdog] All systems ready! 🚀
 ```
 
-#### What happens when a rate limit is hit
+#### What happens when a rate-limit response is detected
 
-1. Watchdog detects the limit signal in the OpenCode log
+1. Watchdog finds the rate-limit/quota message in the OpenCode log
 2. SSH-triggers `renew-wan-ip` on the router
-3. Router sends `DHCPRELEASE`, rotates MAC, reconnects, and waits until `ping 1.1.1.1` succeeds
+3. Router sends `DHCPRELEASE`, reconnects with a randomized MAC, and waits until `ping 1.1.1.1` succeeds
 4. Watchdog sends `Enter` to the `opencode` tmux session
-5. OpenCode retries — fully automatic, no human input needed
+5. OpenCode retries — no manual input needed
 
 #### Configuration via environment variables
 
@@ -187,7 +187,7 @@ On startup, the watchdog runs a self-check and prints:
 TMUX_TARGET=mywork MAX_DAILY_RECOVERIES=20 ./client-watchdog.sh
 ```
 
-#### Manual on-demand IP rotation (from your client PC)
+#### Manual on-demand lease renewal (from your client PC)
 
 Add this alias to your `~/.bashrc` or `~/.zshrc`:
 ```bash

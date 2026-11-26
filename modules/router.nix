@@ -13,7 +13,7 @@
     autoDisableConflicts = true;
     rotateWanIp = {
       enable = true;
-      calendar = "*-*-* 04:00:00"; # Rotate WAN IP daily at 04:00 AM
+      calendar = "*-*-* 04:00:00"; # Renew the WAN DHCP lease daily at 04:00
     };
   };
 

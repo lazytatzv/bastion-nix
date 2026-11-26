@@ -1,5 +1,5 @@
 {
-  description = "bastion-nix: Autonomous Fortress Router & Compute Citadel for Clubroom LAN";
+  description = "bastion-nix: NixOS router and edge compute node for a clubroom LAN";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

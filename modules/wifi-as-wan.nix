@@ -17,7 +17,7 @@ let
     $SUDO ${pkgs.systemd}/bin/networkctl down ${cfg.externalInterface} || true
     sleep 1
 
-    echo "=== Rotating MAC & Restarting iwd.service ==="
+    echo "=== Restarting iwd with a randomized MAC address ==="
     $SUDO ${pkgs.systemd}/bin/systemctl restart iwd.service
 
     echo "=== Restoring Interface & Requesting New IP ==="
@@ -89,17 +89,17 @@ in {
       enable = mkOption {
         type = types.bool;
         default = true;
-        description = "Periodically reconnect WiFi to rotate MAC address and obtain a fresh DHCP lease.";
+        description = "Periodically reconnect WiFi with a randomized MAC address to obtain a fresh DHCP lease.";
       };
       calendar = mkOption {
         type = types.str;
         default = "*-*-* 04:00:00";
-        description = "systemd OnCalendar specification for periodic WAN IP rotation (e.g. daily at 04:00).";
+        description = "systemd OnCalendar specification for periodic WAN lease renewal (e.g. daily at 04:00).";
       };
       randomizedDelaySec = mkOption {
         type = types.str;
         default = "1800";
-        description = "Random jitter delay (in seconds or systemd time like '30m') to prevent detection of scheduled execution.";
+        description = "Random jitter delay (in seconds or systemd time like '30m') to spread scheduled reconnects over time.";
       };
     };
   };
@@ -269,9 +269,9 @@ in {
     networking.firewall.allowedUDPPorts = [ 53 67 68 ];
     networking.firewall.allowedTCPPorts = [ 53 ];
 
-    # Periodic WAN IP / MAC rotation service and timer
+    # Periodic WAN lease renewal service and timer
     systemd.services.rotate-wan-ip = mkIf cfg.rotateWanIp.enable {
-      description = "Rotate WAN IP and randomized MAC address by restarting iwd with clean DHCP release";
+      description = "Renew the WAN DHCP lease with a randomized MAC address by restarting iwd after a clean DHCP release";
       after = [ "network.target" "iwd.service" ];
       wants = [ "network.target" ];
       serviceConfig = {
@@ -281,7 +281,7 @@ in {
     };
 
     systemd.timers.rotate-wan-ip = mkIf cfg.rotateWanIp.enable {
-      description = "Timer for periodic WAN IP rotation";
+      description = "Timer for periodic WAN lease renewal";
       wantedBy = [ "timers.target" ];
       timerConfig = {
         OnCalendar = cfg.rotateWanIp.calendar;

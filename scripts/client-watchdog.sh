@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# OpenCode Client Watchdog & Remote WAN Auto-Recovery
+# OpenCode Client Watchdog & Remote WAN Renewal
 # ==============================================================================
 # Run this script on your Linux client PC where OpenCode runs.
-# It watches local OpenCode logs for quota limits or rate-limiting (429),
-# and remotely triggers `renew-wan-ip` on the bastion router via SSH.
+# It watches local OpenCode logs for rate-limit/quota responses (429),
+# and remotely triggers `renew-wan-ip` on the router via SSH.
 # ==============================================================================
 
 set -euo pipefail
@@ -80,7 +80,7 @@ if [ "${TMUX_AUTO_RETRY}" = "true" ]; then
   else
     echo "[watchdog] tmux session '${TMUX_TARGET}' .............. WARN ⚠"
     echo "[watchdog]   → tmux new -s ${TMUX_TARGET} でOpenCodeを起動するとAuto-Retryが有効になります"
-    echo "[watchdog]   → セッションがなければ制限検知後のEnter自動送信はスキップされます"
+    echo "[watchdog]   → セッションがなければ、レート制限を検知した際のEnter自動送信はスキップされます"
   fi
 fi
 
@@ -109,7 +109,7 @@ if [ ! -d "${WATCH_DIR}" ]; then
   done
 fi
 
-echo "[watchdog] Active. Monitoring logs for rate limits..."
+echo "[watchdog] Active. Monitoring logs for rate-limit/quota responses..."
 
 while true; do
   LATEST_LOG=$(ls -t "${WATCH_DIR}"/*.log 2>/dev/null | head -n 1 || true)
@@ -122,23 +122,23 @@ while true; do
 
         if [ "${current_count}" -ge "${MAX_DAILY_RECOVERIES}" ]; then
           echo "[watchdog] [SAFETY CAP] Daily limit reached (${current_count}/${MAX_DAILY_RECOVERIES})."
-          echo "[watchdog] Halting auto-recovery for today to avoid DHCP/MAC abuse."
+          echo "[watchdog] Halting auto-recovery for today to avoid excessive DHCP/MAC churn."
           notify-send -u critical "OpenCode Watchdog" "1日の自動復旧上限（${MAX_DAILY_RECOVERIES}回）に達しました。本日の自動IP更新を停止します。" 2>/dev/null || true
           sleep 60
           break
         fi
 
-        echo "[watchdog] Rate limit detected in OpenCode log!"
+        echo "[watchdog] Rate-limit/quota response detected in OpenCode log!"
         echo "[watchdog] Triggering remote WAN IP renewal on router (${ROUTER_HOST})..."
-        notify-send "OpenCode Watchdog" "制限検知: ルーターのWAN IPローテーションを開始します..." 2>/dev/null || true
+        notify-send "OpenCode Watchdog" "レート制限を検知: ルーターのWAN IP更新を開始します..." 2>/dev/null || true
 
         # Trigger remote renewal via SSH
         if ssh -o BatchMode=yes -o ConnectTimeout=5 "${ROUTER_USER}@${ROUTER_HOST}" "renew-wan-ip"; then
           new_count=$((current_count + 1))
           set_daily_count "${new_count}"
 
-          echo "[watchdog] WAN IP successfully rotated! (${new_count}/${MAX_DAILY_RECOVERIES} today)."
-          notify-send -u normal "OpenCode Watchdog" "WAN IP更新完了 (${new_count}/${MAX_DAILY_RECOVERIES}回目)。制限が解除されました。" 2>/dev/null || true
+          echo "[watchdog] WAN IP successfully renewed! (${new_count}/${MAX_DAILY_RECOVERIES} today)."
+          notify-send -u normal "OpenCode Watchdog" "WAN IP更新完了 (${new_count}/${MAX_DAILY_RECOVERIES}回目)。接続が復旧しました。" 2>/dev/null || true
           printf '\a' # Beep
 
           # Auto-send retry key to tmux session if running
