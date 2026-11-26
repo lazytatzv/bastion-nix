@@ -13,7 +13,7 @@
     autoDisableConflicts = true;
     rotateWanIp = {
       enable = true;
-      calendar = "*-*-* 04:00:00"; # Rotate WAN IP daily at 04:00 AM
+      calendar = "*-*-* 00,02,04,06,08,10,12,14,16,18,20,22:00:00"; # Rotate WAN IP roughly 10-12 times a day (every 2 hours)
     };
   };
 

@@ -23,7 +23,7 @@
 AlwaysRandomizeAddress=true
 ```
 
-- **自動ローテーション**: `systemd.timers.rotate-wan-ip` により毎日午前4時に自動でiwdが再起動され、MACアドレスとIPが更新されます（`modules/router.nix` の `rotateWanIp` 設定で変更可能）。
+- **自動ローテーション**: `systemd.timers.rotate-wan-ip` により2時間おき（約10〜12回/日）に自動でDHCPRELEASE送信とiwd再起動が行われ、古いIPを解放した上で新しいMACアドレスとIPが更新されます（`modules/router.nix` の `rotateWanIp` 設定で変更可能）。
 - **手動更新**: コマンド `renew-wan-ip` を実行することで、いつでも即座に新しいMACとIPアドレスを取得できます。
 
 ## NAS設定

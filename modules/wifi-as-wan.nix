@@ -4,6 +4,31 @@ with lib;
 
 let
   cfg = config.services.wifi-as-wan;
+
+  renewScript = pkgs.writeShellScriptBin "renew-wan-ip" ''
+    echo "=== Gracefully Releasing Current WAN IP (DHCPRELEASE) ==="
+    if [ "$(${pkgs.coreutils}/bin/id -u)" -ne 0 ]; then
+      SUDO="sudo"
+    else
+      SUDO=""
+    fi
+
+    # Bring interface down in networkd to cleanly send DHCPRELEASE while Wi-Fi association holds
+    $SUDO ${pkgs.systemd}/bin/networkctl down ${cfg.externalInterface} || true
+    sleep 1
+
+    echo "=== Rotating MAC & Restarting iwd.service ==="
+    $SUDO ${pkgs.systemd}/bin/systemctl restart iwd.service
+
+    echo "=== Restoring Interface & Requesting New IP ==="
+    $SUDO ${pkgs.systemd}/bin/networkctl up ${cfg.externalInterface}
+
+    echo "Waiting for WiFi reconnection and DHCP lease..."
+    sleep 6
+    echo "Current IP status on ${cfg.externalInterface}:"
+    ${pkgs.iproute2}/bin/ip -brief addr show ${cfg.externalInterface} || true
+    echo "Done!"
+  '';
 in {
   options.services.wifi-as-wan = {
     enable = mkEnableOption "WiFi as WAN router functionality";
@@ -176,6 +201,7 @@ in {
         UseDNS = false; # We use our own dnsmasq/AdGuard for DNS
         ClientIdentifier = "mac";
         Anonymize = true; # RFC 7844: MAC client identifier and anonymized DHCP requests
+        SendRelease = true; # Cleanly send DHCPRELEASE on link shutdown to return IP to pool
       };
     };
 
@@ -234,12 +260,12 @@ in {
 
     # Periodic WAN IP / MAC rotation service and timer
     systemd.services.rotate-wan-ip = mkIf cfg.rotateWanIp.enable {
-      description = "Rotate WAN IP and randomized MAC address by restarting iwd";
+      description = "Rotate WAN IP and randomized MAC address by restarting iwd with clean DHCP release";
       after = [ "network.target" "iwd.service" ];
       wants = [ "network.target" ];
       serviceConfig = {
         Type = "oneshot";
-        ExecStart = "${pkgs.systemd}/bin/systemctl restart iwd.service";
+        ExecStart = "${renewScript}/bin/renew-wan-ip";
       };
     };
 
@@ -254,16 +280,7 @@ in {
 
     # Helper script to renew WAN IP on demand
     environment.systemPackages = [
-      (pkgs.writeShellScriptBin "renew-wan-ip" ''
-        echo "=== Rotating WAN IP & MAC Address ==="
-        echo "Restarting iwd.service..."
-        sudo ${pkgs.systemd}/bin/systemctl restart iwd.service
-        echo "Waiting for WiFi reconnection and DHCP lease..."
-        sleep 5
-        echo "Current IP status on ${cfg.externalInterface}:"
-        ${pkgs.iproute2}/bin/ip -brief addr show ${cfg.externalInterface} || true
-        echo "Done!"
-      '')
+      renewScript
     ];
   };
 }
