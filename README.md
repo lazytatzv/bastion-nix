@@ -1,16 +1,17 @@
-# clubroom-router-nixos
+# bastion-nix
 
-NixOS flake configuration and modular network infrastructure for the RoDEP clubroom router, remote builder, and edge services host.
+Autonomous Fortress Router & Edge Compute Citadel for Clubroom LAN.
+Hardened defense, stealth WAN rotation, distributed build artillery, and local edge services.
 
 ```
                    +------------------------------------+
                    |   Upstream WiFi (Campus WAN)       |
                    +-----------------+------------------+
-                                     | wlan0 (DHCP + MAC rotation)
-                         [ clubroom-router ]
+                                     | wlan0 (Stealth DHCP / Auto-Release)
+                              [ bastion-nix ]
                                      | enp2s0 (192.168.50.1/24)
                    +-----------------+------------------+
-                   |   Clubroom LAN (dnsmasq / BBR)     |
+                   |   Clubroom Fortress LAN (BBR/CAKE) |
                    +------------------------------------+
 ```
 

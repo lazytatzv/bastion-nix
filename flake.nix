@@ -1,5 +1,5 @@
 {
-  description = "NixOS Flake Configuration for RoDEP Clubroom Router & Builder";
+  description = "bastion-nix: Autonomous Fortress Router & Compute Citadel for Clubroom LAN";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -28,7 +28,15 @@
         ];
       };
 
-      # Alias target (router)
+      # Primary bastion target
+      bastion = nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+        modules = [
+          ./configuration.nix
+        ];
+      };
+
+      # Legacy alias target (router)
       router = nixpkgs.lib.nixosSystem {
         system = "x86_64-linux";
         modules = [

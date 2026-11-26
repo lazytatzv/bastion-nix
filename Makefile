@@ -2,15 +2,15 @@
 
 # Apply NixOS Flake configuration directly
 switch:
-	sudo nixos-rebuild switch --flake .#nixos
+	sudo nixos-rebuild switch --flake .#bastion
 
 # Test configuration without adding to bootloader
 test:
-	sudo nixos-rebuild test --flake .#nixos
+	sudo nixos-rebuild test --flake .#bastion
 
 # Build and set as boot default (activate on reboot)
 boot:
-	sudo nixos-rebuild boot --flake .#nixos
+	sudo nixos-rebuild boot --flake .#bastion
 
 # Update flake.lock dependencies
 update:
