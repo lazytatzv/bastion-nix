@@ -51,18 +51,18 @@ Import modules into external flakes (`flake.nix`):
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    clubroom-router.url = "github:rodep-soft/clubroom-router-nixos";
+    bastion-nix.url = "github:lazytatzv/bastion-nix";
   };
 
-  outputs = { self, nixpkgs, clubroom-router, ... }: {
+  outputs = { self, nixpkgs, bastion-nix, ... }: {
     nixosConfigurations.my-router = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
       modules = [
         # Import single module
-        clubroom-router.nixosModules.wifiAsWan
+        bastion-nix.nixosModules.wifiAsWan
 
         # Or import all modules and toggle via options
-        # clubroom-router.nixosModules.default
+        # bastion-nix.nixosModules.default
 
         {
           services.wifi-as-wan = {
@@ -84,7 +84,7 @@ Available exported modules:
 * `nixosModules.proxy` (`services.clubroom-proxy`)
 * `nixosModules.monitoring` (`services.clubroom-monitoring`)
 * `nixosModules.services` (`services.clubroom-services`)
-* `nixosModules.runner` (`services.rodep-runner`)
+* `nixosModules.runner` (`services.bastion-runner`)
 * `nixosModules.default` (imports all modules)
 
 ---

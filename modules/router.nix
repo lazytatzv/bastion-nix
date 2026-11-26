@@ -65,7 +65,7 @@
   services.clubroom-monitoring.enable = true;
 
   # GitHub Actions self-hosted runner
-  services.rodep-runner.enable = true;
+  services.bastion-runner.enable = true;
 
   # ==========================================
   # Host Network & Firewall Rules

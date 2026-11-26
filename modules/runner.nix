@@ -3,14 +3,14 @@
 with lib;
 
 let
-  cfg = config.services.rodep-runner;
+  cfg = config.services.bastion-runner;
 in {
-  options.services.rodep-runner = {
-    enable = mkEnableOption "GitHub Actions Self-Hosted Runner for rodep-soft";
+  options.services.bastion-runner = {
+    enable = mkEnableOption "GitHub Actions Self-Hosted Runner";
 
     url = mkOption {
       type = types.str;
-      default = "https://github.com/rodep-soft";
+      default = "https://github.com/lazytatzv";
       description = "GitHub repository or organization URL.";
     };
 
@@ -28,7 +28,7 @@ in {
   };
 
   config = mkIf cfg.enable {
-    services.github-runners.rodep-builder = {
+    services.github-runners.bastion-builder = {
       enable = true;
       url = cfg.url;
       tokenFile = cfg.tokenFile;
