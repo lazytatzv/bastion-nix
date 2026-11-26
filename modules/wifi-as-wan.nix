@@ -23,8 +23,14 @@ let
     echo "=== Restoring Interface & Requesting New IP ==="
     $SUDO ${pkgs.systemd}/bin/networkctl up ${cfg.externalInterface}
 
-    echo "Waiting for WiFi reconnection and DHCP lease..."
-    sleep 6
+    echo "Waiting for WAN connectivity to be restored..."
+    for i in $(${pkgs.coreutils}/bin/seq 1 30); do
+      if ${pkgs.iputils}/bin/ping -c 1 -W 1 1.1.1.1 >/dev/null 2>&1; then
+        echo "Internet restored in ''${i}s!"
+        break
+      fi
+      sleep 1
+    done
     echo "Current IP status on ${cfg.externalInterface}:"
     ${pkgs.iproute2}/bin/ip -brief addr show ${cfg.externalInterface} || true
     echo "Done!"
