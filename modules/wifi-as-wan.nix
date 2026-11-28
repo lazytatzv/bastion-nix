@@ -8,6 +8,15 @@ let
   renewScript = pkgs.writeShellScriptBin "renew-wan-ip" ''
     set -uo pipefail
 
+    if [ "''${1:-}" != "--locked" ]; then
+      ${pkgs.util-linux}/bin/flock -n -E 75 /run/lock/renew-wan-ip.lock "$0" --locked
+      status=$?
+      if [ "$status" -eq 75 ]; then
+        echo "WAN renewal is already running; refusing to start a concurrent renewal." >&2
+      fi
+      exit "$status"
+    fi
+
     echo "=== Gracefully Releasing Current WAN IP (DHCPRELEASE) ==="
     if [ "$(${pkgs.coreutils}/bin/id -u)" -ne 0 ]; then
       SUDO="sudo"
@@ -270,10 +279,11 @@ in {
       resolveLocalQueries = mkDefault false;
     };
 
-    # Allow DHCP and DNS traffic from the internal network
-    # NixOS automatically merges these lists.
-    networking.firewall.allowedUDPPorts = [ 53 67 68 ];
-    networking.firewall.allowedTCPPorts = [ 53 ];
+    # Keep LAN DHCP and DNS ports off the upstream interface.
+    networking.firewall.interfaces.${cfg.internalInterface} = {
+      allowedUDPPorts = [ 53 67 68 ];
+      allowedTCPPorts = [ 53 ];
+    };
 
     # Periodic WAN lease renewal service and timer
     systemd.services.rotate-wan-ip = mkIf cfg.rotateWanIp.enable {

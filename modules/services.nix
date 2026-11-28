@@ -47,7 +47,7 @@ in {
     services.filebrowser = {
       enable = true;
       settings = {
-        address = "0.0.0.0";
+        address = "127.0.0.1";
         port = 8080;
         root = toString cfg.dataPath;
       };
@@ -96,7 +96,5 @@ in {
     # OpenSSH Server
     services.openssh.enable = true;
 
-    # Distcc Ports (3632 daemon, 3633 web stats)
-    networking.firewall.allowedTCPPorts = [ 3632 3633 ];
   };
 }

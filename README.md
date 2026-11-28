@@ -156,6 +156,8 @@ Local `*.lan` names are mapped to the router address by dnsmasq and routed by Ca
 
 The services module also enables Tailscale, Docker with BuildKit, and the GitHub Actions self-hosted runner. The runner is configured for the repository URL in `modules/router.nix`; its registration token is read from `/var/lib/github-runner/token` and must be provisioned on the host.
 
+The host firewall scopes application service ports to the LAN (`enp2s0`) and Tailscale (`tailscale0`) interfaces instead of opening them on every interface. The WAN interface (`wlan0`) is not granted these application ports. FileBrowser listens on localhost and is reached through Caddy. The firewall allows Tailscale's configured UDP transport port (41641 by default) on any interface so encrypted peer connections can establish directly; this does not expose the application services. Tailscale access still depends on the tailnet ACL/grants: allow only the intended users and devices there.
+
 ## Monitoring and performance profile
 
 The monitoring module configures Node Exporter on localhost port 9100, Prometheus on localhost port 9090 with 30-day retention, and Grafana on localhost port 3100. Caddy exposes Grafana on the LAN.
@@ -182,6 +184,7 @@ Behavior:
 
 * `ECONNRESET` and `Connection lost due to` are treated as connection failures. If enabled and the tmux session exists, the watchdog interrupts the current prompt and sends `Please retry the previous request.` It does not renew the WAN lease for these connection errors.
 * Rate-limit/quota patterns (including `429`, `QuotaExceeded`, and `Free usage limit reached`) trigger notifications on the client and home PC, then run `renew-wan-ip` on the router. If WAN renewal succeeds, the watchdog sends the retry prompt to OpenCode. A daily safety cap (10 renewals by default) prevents further automatic renewals after it is reached.
+* Only one watchdog instance may run per user. The daily recovery count is persistent across reboots, and each renewal attempt counts against the daily cap even if SSH or WAN renewal fails. The router also locks `renew-wan-ip` across watchdog, timer, and manual invocations, refusing overlapping renewals.
 * After a successful WAN renewal, the watchdog asks Tailscale to immediately refresh its public UDP mapping (`tailscale debug restun`). This can reduce the stale-endpoint interval before the home PC can reach `rodep` again. The command needs Tailscale operator permission; grant it once on the OpenCode PC with `sudo tailscale set --operator=yano` (replace `yano` with the account running the watchdog). If permission is missing, WAN recovery and OpenCode retry still continue, and the watchdog prints a warning.
 * `session.idle` events from the OpenCode plugin are passed to the watchdog through a local FIFO. On each idle event, it sends a completion notification to the home PC and, by default, submits one conservative behavior-preserving refactoring task to the OpenCode tmux session. The next idle event repeats this cycle. The prompt asks OpenCode to run relevant tests and not commit or push.
 * This is intentionally a repeated automation loop: stop the watchdog or set `AUTO_REFACTOR_ON_IDLE=false` if you do not want another pass to start after each completion. Do not run multiple watchdog instances for the same OpenCode session.
@@ -201,7 +204,8 @@ Configuration environment variables:
 | `TMUX_REFACTOR_PROMPT` | Built-in conservative refactor prompt | Override the automatic refactor prompt |
 | `PATTERN` | Built-in connection/quota regex | Override log patterns watched by the script |
 | `EVENT_FIFO` | `~/.local/state/opencode/client-watchdog-events.fifo` | Local FIFO used by the OpenCode plugin |
-| `STATE_FILE` | `/tmp/opencode-client-watchdog.state` | Date and count of automatic WAN renewals |
+| `STATE_FILE` | `~/.local/state/opencode/client-watchdog.state` | Persistent date and count of WAN renewal attempts |
+| `WATCHDOG_LOCK_FILE` | `~/.local/state/opencode/client-watchdog.lock` | Prevents duplicate watchdog instances |
 
 Example with a different tmux session and no automatic refactoring:
 

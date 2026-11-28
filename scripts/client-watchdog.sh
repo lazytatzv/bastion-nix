@@ -14,8 +14,10 @@ ROUTER_USER="${ROUTER_USER:-yano}"
 WATCH_DIR="${WATCH_DIR:-${HOME}/.local/share/opencode/log}"
 PATTERN="${PATTERN:-used today.*free messages|free usage limit reached|connection lost due to|ECONNRESET|429|rate[- ]?limit|quota[- ]?exceeded|resource_exhausted}"
 MAX_DAILY_RECOVERIES="${MAX_DAILY_RECOVERIES:-10}"
-STATE_FILE="${STATE_FILE:-/tmp/opencode-client-watchdog.state}"
 EVENT_FIFO="${EVENT_FIFO:-${HOME}/.local/state/opencode/client-watchdog-events.fifo}"
+STATE_FILE="${STATE_FILE:-${HOME}/.local/state/opencode/client-watchdog.state}"
+LEGACY_STATE_FILE="${LEGACY_STATE_FILE:-/tmp/opencode-client-watchdog.state}"
+WATCHDOG_LOCK_FILE="${WATCHDOG_LOCK_FILE:-${HOME}/.local/state/opencode/client-watchdog.lock}"
 TMUX_TARGET="${TMUX_TARGET:-opencode}"
 TMUX_AUTO_RETRY="${TMUX_AUTO_RETRY:-true}"
 AUTO_REFACTOR_ON_IDLE="${AUTO_REFACTOR_ON_IDLE:-true}"
@@ -32,6 +34,17 @@ echo "Auto-refactor on idle: ${AUTO_REFACTOR_ON_IDLE} (target: '${TMUX_TARGET}')
 echo ""
 
 mkdir -p "$(dirname "${EVENT_FIFO}")"
+mkdir -p "$(dirname "${STATE_FILE}")" "$(dirname "${WATCHDOG_LOCK_FILE}")"
+if ! command -v flock >/dev/null 2>&1; then
+  echo "[watchdog] [ERROR] flock is required to prevent duplicate watchdog instances." >&2
+  exit 1
+fi
+exec 9>"${WATCHDOG_LOCK_FILE}"
+if ! flock -n 9; then
+  echo "[watchdog] [ERROR] Another client-watchdog instance is already running." >&2
+  exit 1
+fi
+
 if [ -e "${EVENT_FIFO}" ] && [ ! -p "${EVENT_FIFO}" ]; then
   echo "[watchdog] [ERROR] Notification event path exists and is not a FIFO: ${EVENT_FIFO}" >&2
   exit 1
@@ -78,10 +91,14 @@ trap cleanup EXIT
 trap 'exit 0' INT TERM
 
 get_daily_count() {
-  local today saved_date saved_count
+  local today saved_date saved_count state_path
   today=$(date +%F)
-  if [ -f "${STATE_FILE}" ]; then
-    read -r saved_date saved_count < "${STATE_FILE}" 2>/dev/null || true
+  state_path="${STATE_FILE}"
+  if [ ! -f "${state_path}" ] && [ -f "${LEGACY_STATE_FILE}" ]; then
+    state_path="${LEGACY_STATE_FILE}"
+  fi
+  if [ -f "${state_path}" ]; then
+    read -r saved_date saved_count < "${state_path}" 2>/dev/null || true
     if [ "${saved_date:-}" = "${today}" ]; then
       echo "${saved_count:-0}"
       return
@@ -189,10 +206,9 @@ while true; do
             echo "[watchdog] Halting auto-recovery for today to avoid excessive DHCP/MAC churn."
             notify-send -u critical "OpenCode Watchdog" "1日の自動復旧上限（${MAX_DAILY_RECOVERIES}回）に達しました。本日の自動IP更新を停止します。" 2>/dev/null || true
           else
+            new_count=$((current_count + 1))
+            set_daily_count "${new_count}"
             if ssh -o BatchMode=yes -o ConnectTimeout=5 "${ROUTER_USER}@${ROUTER_HOST}" "renew-wan-ip"; then
-              new_count=$((current_count + 1))
-              set_daily_count "${new_count}"
-
               echo "[watchdog] WAN IP successfully renewed! (${new_count}/${MAX_DAILY_RECOVERIES} today)."
               notify-send -u normal "OpenCode Watchdog" "WAN IP更新完了 (${new_count}/${MAX_DAILY_RECOVERIES}回目)。接続が復旧しました。" 2>/dev/null || true
               printf '\a'
@@ -206,7 +222,7 @@ while true; do
                 fi
               fi
             else
-              echo "[watchdog] [ERROR] Failed to execute renew-wan-ip on router via SSH."
+              echo "[watchdog] [ERROR] WAN renewal attempt failed (${new_count}/${MAX_DAILY_RECOVERIES} attempts today)."
               notify-send -u critical "OpenCode Watchdog" "ルーターへのSSH接続またはIP更新に失敗しました。" 2>/dev/null || true
             fi
           fi

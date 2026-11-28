@@ -70,6 +70,9 @@
     url = "https://github.com/rodep-soft/abu2027-br-pc";
   };
 
+  services.tailscale.openFirewall = true;
+  services.openssh.openFirewall = false;
+
   # ==========================================
   # Host Network & Firewall Rules
   # ==========================================
@@ -80,8 +83,23 @@
       enable = true;
       checkReversePath = false;
       allowPing = true;
-      allowedTCPPorts = [ 22 80 443 2049 4000 4001 4002 8189 8000 8001 8889 8888 8554 3000 8080 ];
-      allowedUDPPorts = [ 53 67 68 2049 4000 4001 4002 8889 8888 8554 ];
+      interfaces = {
+        enp2s0 = {
+          allowedTCPPorts = [
+            22 80 443 2049 3000 3632 3633 4000 4001 4002
+            8000 8001 8189 8554 8888 8889
+          ];
+          allowedUDPPorts = [
+            2049 4000 4001 4002 8000 8001 8554 8888 8889
+          ];
+        };
+        tailscale0 = {
+          allowedTCPPorts = [
+            22 80 443 2049 3632 3633 4000 4001 4002
+          ];
+          allowedUDPPorts = [ 2049 4000 4001 4002 ];
+        };
+      };
     };
     networkmanager.enable = false;
   };
