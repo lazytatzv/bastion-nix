@@ -188,7 +188,7 @@ TMUX_TARGET=mywork MAX_DAILY_RECOVERIES=20 ./client-watchdog.sh
 
 ### Notify your home PC when OpenCode finishes
 
-OpenCode can send a desktop notification to the Arch PC at home when a session becomes idle. This uses the OpenCode `session.idle` event and a reverse SSH tunnel opened by the existing home-to-work SSH connection. Only a fixed `done` event is sent; prompts and generated content are not transmitted.
+OpenCode can send a desktop notification to the Arch PC at home when a session becomes idle. This uses the OpenCode `session.idle` event and a direct SSH connection over Tailscale. Only a fixed `done` event is sent; prompts and generated content are not transmitted.
 
 Run this **once from your home Arch PC**, replacing `opencode-work` with your existing SSH alias and `/path/to/clubroom-router-nixos` with the repository path on the OpenCode PC:
 
@@ -197,9 +197,9 @@ ssh opencode-work 'cat /path/to/clubroom-router-nixos/scripts/setup-opencode-hom
   | bash -s -- opencode-work /path/to/clubroom-router-nixos
 ```
 
-The setup creates a notification-only SSH key, installs the OpenCode event hook and updated watchdog script, and writes a forced `notify-send` command into the home PC's `authorized_keys`; there is no receiver script to run. It adds reverse forwarding to your existing SSH alias instead of creating a background service. Existing SSH keys and config entries are preserved. OpenCode signals the already-running `client-watchdog.sh` through a FIFO when a session becomes idle; the watchdog sends the desktop notification. Its existing quota/IP-recovery behavior is unchanged.
+The setup creates a notification-only SSH key, installs the OpenCode event hook and updated watchdog script, and writes a forced `notify-send` command into the home PC's `authorized_keys`; there is no receiver script to run. It configures direct SSH to the home PC's Tailscale IP. No reverse forwarding, port conflict, or background tunnel service is needed. It also removes the old notification reverse-forward setting from the work SSH alias. OpenCode signals the already-running `client-watchdog.sh` through a FIFO when a session becomes idle; the watchdog sends the desktop notification. Its existing quota/IP-recovery behavior is unchanged.
 
-On the OpenCode PC, restart the watchdog once so it uses the updated script, and restart OpenCode once to load the event hook. Keep running the watchdog as you normally do. After setup, use your normal `ssh opencode-work` connection; it now carries the notification tunnel while connected. The home PC must be logged into its graphical desktop for notifications to appear.
+On the OpenCode PC, restart the watchdog once so it uses the updated script, and restart OpenCode once to load the event hook. Keep running the watchdog as you normally do. Both PCs need to be online in Tailscale, and the home PC must be logged into its graphical session. WAN reconnects can interrupt SSH to the work PC, but the watchdog can reconnect to the home PC directly after Tailscale is back.
 
 #### Manual on-demand lease renewal (from your client PC)
 

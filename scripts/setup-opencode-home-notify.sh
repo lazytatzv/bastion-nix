@@ -9,13 +9,46 @@ fi
 work_alias="$1"
 remote_repo="$2"
 home_user="$(id -un)"
+home_tailscale_ip="$(tailscale ip -4 | head -n 1)"
 authorized_keys="${HOME}/.ssh/authorized_keys"
 ssh_config="${HOME}/.ssh/config"
+install -d -m 700 "$(dirname "$ssh_config")"
+touch "$ssh_config"
+chmod 600 "$ssh_config"
+
+tmp_ssh_config="$(mktemp)"
+awk '
+  tolower($1) == "host" {
+    target = 0
+    for (i = 2; i <= NF; i++) if ($i == "opencode-home-notify") target = 1
+  }
+  !target { print }
+' "$ssh_config" > "$tmp_ssh_config"
+chmod 600 "$tmp_ssh_config"
+mv "$tmp_ssh_config" "$ssh_config"
 
 if [[ ! "$work_alias" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "WORK_SSH_ALIAS may contain only letters, numbers, dots, underscores, and hyphens." >&2
   exit 2
 fi
+if [[ ! "$home_tailscale_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Could not determine this PC's Tailscale IPv4 address. Make sure Tailscale is connected." >&2
+  exit 1
+fi
+
+tmp_ssh_config="$(mktemp)"
+awk -v alias="$work_alias" '
+  tolower($1) == "host" {
+    target = 0
+    for (i = 2; i <= NF; i++) if ($i == alias) target = 1
+  }
+  target && tolower($1) == "remoteforward" &&
+    $2 == "127.0.0.1:2222" && $3 == "127.0.0.1:22" { next }
+  target && tolower($1) == "exitonforwardfailure" && tolower($2) == "yes" { next }
+  { print }
+' "$ssh_config" > "$tmp_ssh_config"
+chmod 600 "$tmp_ssh_config"
+mv "$tmp_ssh_config" "$ssh_config"
 
 echo "Checking SSH access to ${work_alias}..."
 if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "${work_alias}" true; then
@@ -26,10 +59,11 @@ fi
 
 echo "Installing the watchdog, completion hook, and notification key on the OpenCode PC..."
 public_key="$(
-  ssh "${work_alias}" bash -s -- "${remote_repo}" "${home_user}" <<'REMOTE'
+  ssh "${work_alias}" bash -s -- "${remote_repo}" "${home_user}" "${home_tailscale_ip}" <<'REMOTE'
 set -euo pipefail
 repo="$1"
 home_user="$2"
+home_tailscale_ip="$3"
 key="$HOME/.ssh/opencode_notify_home"
 ssh_config="$HOME/.ssh/config"
 mkdir -p "$HOME/.ssh" "$HOME/.config/opencode/plugins"
@@ -43,12 +77,19 @@ install -Dm755 "$repo/scripts/client-watchdog.sh" \
   "$HOME/.local/bin/client-watchdog.sh"
 touch "$ssh_config"
 chmod 600 "$ssh_config"
-if ! grep -Eq '^[[:space:]]*Host[[:space:]]+opencode-home-notify([[:space:]]|$)' "$ssh_config"; then
-  cat >> "$ssh_config" <<SSH_CONFIG
+tmp_ssh_config="$(mktemp)"
+awk '
+  tolower($1) == "host" {
+    target = 0
+    for (i = 2; i <= NF; i++) if ($i == "opencode-home-notify") target = 1
+  }
+  !target { print }
+' "$ssh_config" > "$tmp_ssh_config"
+cat >> "$tmp_ssh_config" <<SSH_CONFIG
 
 Host opencode-home-notify
-  HostName 127.0.0.1
-  Port 2222
+  HostName ${home_tailscale_ip}
+  Port 22
   User ${home_user}
   IdentityFile ~/.ssh/opencode_notify_home
   IdentitiesOnly yes
@@ -56,7 +97,8 @@ Host opencode-home-notify
   ConnectTimeout 5
   StrictHostKeyChecking accept-new
 SSH_CONFIG
-fi
+chmod 600 "$tmp_ssh_config"
+mv "$tmp_ssh_config" "$ssh_config"
 cat "$key.pub"
 REMOTE
 )"
@@ -89,68 +131,7 @@ rm -f "$tmp_authorized_keys"
 notify_command="/usr/bin/env XDG_RUNTIME_DIR=/run/user/\$(/usr/bin/id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/\$(/usr/bin/id -u)/bus /usr/bin/notify-send --app-name=OpenCode '作業完了' 'OpenCodeの応答が完了しました。'"
 printf 'command="%s",restrict %s\n' "$notify_command" "$public_key" >> "$authorized_keys"
 
-install -d -m 700 "$(dirname "$ssh_config")"
-touch "$ssh_config"
-chmod 600 "$ssh_config"
-if ! grep -Eq '^[[:space:]]*Host[[:space:]]+opencode-home-notify([[:space:]]|$)' "$ssh_config"; then
-  cat >> "$ssh_config" <<'SSH_CONFIG'
-
-Host opencode-home-notify
-  HostName 127.0.0.1
-  Port 2222
-  User __HOME_USER__
-  IdentityFile ~/.ssh/opencode_notify_home
-  IdentitiesOnly yes
-  BatchMode yes
-  ConnectTimeout 5
-  StrictHostKeyChecking accept-new
-SSH_CONFIG
-  sed -i "s/__HOME_USER__/${home_user}/" "$ssh_config"
-fi
-
-if ! awk -v alias="$work_alias" '
-  tolower($1) == "host" {
-    for (i = 2; i <= NF; i++) if ($i == alias) found = 1
-  }
-  END { exit !found }
-' "$ssh_config"; then
-  cat >> "$ssh_config" <<SSH_CONFIG
-
-Host ${work_alias}
-  RemoteForward 127.0.0.1:2222 127.0.0.1:22
-  ExitOnForwardFailure yes
-SSH_CONFIG
-elif ! awk -v alias="$work_alias" '
-  tolower($1) == "host" {
-    target = 0
-    for (i = 2; i <= NF; i++) if ($i == alias) target = 1
-    next
-  }
-  target && tolower($1) == "remoteforward" &&
-    $2 == "127.0.0.1:2222" && $3 == "127.0.0.1:22" { found = 1 }
-  END { exit !found }
-' "$ssh_config"; then
-  tmp_ssh_config="$(mktemp)"
-  awk -v alias="$work_alias" '
-    tolower($1) == "host" {
-      target = 0
-      for (i = 2; i <= NF; i++) if ($i == alias) target = 1
-      print
-      if (target && !inserted) {
-        print "  RemoteForward 127.0.0.1:2222 127.0.0.1:22"
-        print "  ExitOnForwardFailure yes"
-        inserted = 1
-      }
-      next
-    }
-    { print }
-    END { if (!inserted) exit 1 }
-  ' "$ssh_config" > "$tmp_ssh_config"
-  chmod 600 "$tmp_ssh_config"
-  mv "$tmp_ssh_config" "$ssh_config"
-fi
-
 echo
 echo "Setup complete."
-echo "SSH to ${work_alias} as usual; that connection now carries the notification tunnel."
+echo "Notifications connect directly to this PC over Tailscale; no SSH port forwarding is used."
 echo "Restart OpenCode on the remote PC once to load the plugin."
