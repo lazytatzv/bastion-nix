@@ -44,10 +44,10 @@ handle_notification_events() {
   while true; do
     while IFS= read -r event; do
       if [ "${event}" = "done" ]; then
-        if selected_action=$(ssh -T -o BatchMode=yes -o ConnectTimeout=5 opencode-home-notify); then
+        if selected_action=$(timeout 120s ssh -T -o BatchMode=yes -o ConnectTimeout=5 opencode-home-notify); then
           case "${selected_action}" in
             continue)
-              if [ "${TMUX_AUTO_RETRY}" = "true" ] && tmux has-session -t "${TMUX_TARGET}" 2>/dev/null; then
+              if tmux has-session -t "${TMUX_TARGET}" 2>/dev/null; then
                 tmux send-keys -t "${TMUX_TARGET}" -l "${TMUX_CONTINUE_PROMPT}"
                 tmux send-keys -t "${TMUX_TARGET}" Enter
                 echo "[watchdog] Continue selected; sent follow-up prompt to '${TMUX_TARGET}'."
