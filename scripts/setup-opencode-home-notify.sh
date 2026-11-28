@@ -20,7 +20,11 @@ if [[ ! "$work_alias" =~ ^[A-Za-z0-9._-]+$ ]]; then
 fi
 
 echo "Checking SSH access to ${work_alias}..."
-ssh -o BatchMode=yes -o ConnectTimeout=5 "${work_alias}" true
+if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "${work_alias}" true; then
+  echo "SSH access to ${work_alias} is not available without an interactive password." >&2
+  echo "Set up key-based SSH first (for example: ssh-copy-id ${work_alias}), then rerun this command." >&2
+  exit 1
+fi
 
 echo "Installing the watchdog, completion hook, and notification key on the OpenCode PC..."
 public_key="$(
