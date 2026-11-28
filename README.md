@@ -203,6 +203,17 @@ The notification offers **次の指示を手動で入力**, **完了・放置**,
 
 On the OpenCode PC, restart the watchdog once so it uses the updated script, and restart OpenCode once to load the event hook. Keep running the watchdog as you normally do. Both PCs need to be online in Tailscale, and the home PC must be logged into its graphical session. WAN reconnects can interrupt SSH to the work PC, but the watchdog can reconnect to the home PC directly after Tailscale is back.
 
+#### Reconnecting to the work PC from your home Arch PC
+
+The regular `ssh archer` command does not reconnect automatically. To use the reconnecting `archer` shell function, source the repository script from your home Arch PC's `~/.zshrc` (replace the path with the local clone path):
+
+```zsh
+echo 'source ~/bastion-nix/scripts/archer-reconnect.zsh' >> ~/.zshrc
+source ~/.zshrc
+```
+
+Then run `archer`. If SSH disconnects, it retries every 2 seconds; keep the terminal open while it reconnects and press `Ctrl-C` to stop. SSH keepalives detect an unreachable connection after about 45 seconds. This does not make the underlying SSH connection seamless; it starts a new SSH session after the network is reachable again.
+
 #### Manual on-demand lease renewal (from your client PC)
 
 Add this alias to your `~/.bashrc` or `~/.zshrc`:
