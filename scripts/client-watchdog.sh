@@ -208,7 +208,7 @@ while true; do
           else
             new_count=$((current_count + 1))
             set_daily_count "${new_count}"
-            if ssh -o BatchMode=yes -o ConnectTimeout=5 "${ROUTER_USER}@${ROUTER_HOST}" "renew-wan-ip"; then
+            if ssh -o BatchMode=yes -o ConnectTimeout=5 "${ROUTER_USER}@${ROUTER_HOST}" "sudo -n renew-wan-ip"; then
               echo "[watchdog] WAN IP successfully renewed! (${new_count}/${MAX_DAILY_RECOVERIES} today)."
               notify-send -u normal "OpenCode Watchdog" "WAN IP更新完了 (${new_count}/${MAX_DAILY_RECOVERIES}回目)。接続が復旧しました。" 2>/dev/null || true
               printf '\a'
