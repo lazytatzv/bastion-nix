@@ -180,7 +180,7 @@ in {
     networking.wireless.iwd.enable = mkDefault true;
     networking.wireless.iwd.settings = mkDefault {
       General = {
-        AddressRandomization = "network";
+        AddressRandomization = "once";
 	AddressRandomizationRange = "full";
       };
       Network = {

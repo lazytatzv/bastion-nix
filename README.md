@@ -118,12 +118,12 @@ Example importing one module from another flake:
 
 ## Router and WAN lease management
 
-The `wifi-as-wan` module uses `systemd-networkd` for WAN DHCP and the LAN address, `iwd` for upstream Wi-Fi, `dnsmasq` for LAN DHCP/DNS, and nftables-backed NixOS NAT/firewall configuration. It sends DHCP release when bringing down the WAN interface.
+The `wifi-as-wan` module uses `systemd-networkd` for WAN DHCP and the LAN address, `iwd` for upstream Wi-Fi, `dnsmasq` for LAN DHCP/DNS, and nftables-backed NixOS NAT/firewall configuration. It sends DHCP release when bringing down the WAN interface. iwd randomizes the full Wi-Fi MAC once per daemon start; restarting iwd as part of a lease renewal therefore presents a new randomized MAC to the upstream network.
 
 `renew-wan-ip` performs a manual WAN lease renewal:
 
 1. Brings the WAN interface down to release its DHCP lease.
-2. Restarts `iwd` (configured for per-network MAC randomization).
+2. Restarts `iwd` (configured to generate a new randomized MAC on each daemon start).
 3. Brings the interface back up and waits up to 30 seconds for a ping to `1.1.1.1`.
 4. Returns a failure status if connectivity does not return in time.
 
