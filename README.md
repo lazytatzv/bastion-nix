@@ -164,7 +164,7 @@ The performance module selects the Zen kernel by default, configures BBR and CAK
 
 ## OpenCode client watchdog
 
-`scripts/client-watchdog.sh` runs on the Linux PC where OpenCode is running. It tails OpenCode logs in `~/.local/share/opencode/log` and expects OpenCode to run inside a tmux session named `opencode`.
+`scripts/client-watchdog.sh` runs on the Linux PC where OpenCode is running. It tails OpenCode logs in `~/.local/share/opencode/log`, uses SSH to access the router, and expects OpenCode to run inside a tmux session named `opencode`.
 
 Start OpenCode and the watchdog in separate terminals:
 
@@ -180,9 +180,8 @@ opencode
 
 Behavior:
 
-* `ECONNRESET` and `Connection lost due to` are treated as connection failures. If enabled and the tmux session exists, the watchdog interrupts the current prompt and sends `Please retry the previous request.` It does not renew the WAN lease.
-* Provider rate-limit/quota patterns (including `429`, `QuotaExceeded`, and `Free usage limit reached`) trigger a local desktop notification and a notification to the home PC. No WAN-IP change or automatic retry is attempted for these provider limits.
-* A detected provider limit pauses automatic refactoring for the rest of that watchdog process. Restart the watchdog after the provider limit is cleared to resume.
+* `ECONNRESET` and `Connection lost due to` are treated as connection failures. If enabled and the tmux session exists, the watchdog interrupts the current prompt and sends `Please retry the previous request.` It does not renew the WAN lease for these connection errors.
+* Rate-limit/quota patterns (including `429`, `QuotaExceeded`, and `Free usage limit reached`) trigger notifications on the client and home PC, then run `renew-wan-ip` on the router. If WAN renewal succeeds, the watchdog sends the retry prompt to OpenCode. A daily safety cap (10 renewals by default) prevents further automatic renewals after it is reached.
 * `session.idle` events from the OpenCode plugin are passed to the watchdog through a local FIFO. On each idle event, it sends a completion notification to the home PC and, by default, submits one conservative behavior-preserving refactoring task to the OpenCode tmux session. The next idle event repeats this cycle. The prompt asks OpenCode to run relevant tests and not commit or push.
 * This is intentionally a repeated automation loop: stop the watchdog or set `AUTO_REFACTOR_ON_IDLE=false` if you do not want another pass to start after each completion. Do not run multiple watchdog instances for the same OpenCode session.
 
@@ -194,11 +193,14 @@ Configuration environment variables:
 | `TMUX_TARGET` | `opencode` | tmux session containing OpenCode |
 | `TMUX_AUTO_RETRY` | `true` | Retry detected connection failures in tmux |
 | `TMUX_RETRY_PROMPT` | `Please retry the previous request.` | Prompt used for connection-error retry |
+| `ROUTER_HOST` | `192.168.50.1` | Router LAN address |
+| `ROUTER_USER` | `yano` | SSH account on the router |
+| `MAX_DAILY_RECOVERIES` | `10` | Maximum automatic WAN renewals per day |
 | `AUTO_REFACTOR_ON_IDLE` | `true` | Submit a bounded refactoring task on each idle event |
 | `TMUX_REFACTOR_PROMPT` | Built-in conservative refactor prompt | Override the automatic refactor prompt |
 | `PATTERN` | Built-in connection/quota regex | Override log patterns watched by the script |
 | `EVENT_FIFO` | `~/.local/state/opencode/client-watchdog-events.fifo` | Local FIFO used by the OpenCode plugin |
-| `LIMIT_STATE_FILE` | `/tmp/opencode-client-watchdog.limited` | Records whether this watchdog process detected a limit |
+| `STATE_FILE` | `/tmp/opencode-client-watchdog.state` | Date and count of automatic WAN renewals |
 
 Example with a different tmux session and no automatic refactoring:
 
@@ -230,7 +232,7 @@ Logs can contain prompt or project data. Review and redact sensitive content bef
 
 ## Completion and usage-limit notifications to a home PC
 
-The OpenCode plugin at `scripts/opencode-home-notify.js` subscribes to OpenCode's `session.idle` event and sends only the fixed `done` event through the local FIFO. The watchdog sends the desktop notification over direct SSH on Tailscale. For a recognized provider limit, the watchdog sends the fixed `limit` event. Neither event contains prompts or generated content.
+The OpenCode plugin at `scripts/opencode-home-notify.js` subscribes to OpenCode's `session.idle` event and sends only the fixed `done` event through the local FIFO. The watchdog sends the desktop notification over direct SSH on Tailscale. For a recognized provider limit, the watchdog sends the fixed `limit` event and continues its existing WAN renewal and retry flow. Neither event contains prompts or generated content.
 
 ### Prerequisites
 
