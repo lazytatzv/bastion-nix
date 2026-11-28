@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+uid="$(/usr/bin/id -u)"
+export XDG_RUNTIME_DIR="/run/user/${uid}"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus"
+
+case "${SSH_ORIGINAL_COMMAND:-}" in
+  done)
+    exec /usr/bin/notify-send --app-name=OpenCode "作業完了" \
+      "OpenCodeの応答が完了しました。自動refactorを開始します。"
+    ;;
+  limit)
+    exec /usr/bin/notify-send --urgency=critical --app-name=OpenCode \
+      "OpenCodeの利用上限に到達" \
+      "自動再試行を停止しました。利用可能になってからwatchdogを再起動してください。"
+    ;;
+  *)
+    echo "Unsupported notification event." >&2
+    exit 2
+    ;;
+esac

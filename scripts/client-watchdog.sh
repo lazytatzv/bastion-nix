@@ -1,33 +1,29 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# OpenCode Client Watchdog & Remote WAN Renewal
+# OpenCode Client Watchdog & Completion Notifications
 # ==============================================================================
 # Run this script on your Linux client PC where OpenCode runs.
-# It watches local OpenCode logs for rate-limit/quota responses (429),
-# and remotely triggers `renew-wan-ip` on the router via SSH.
+# It watches OpenCode logs for connection and usage-limit errors, and reports
+# completed sessions to the home PC.
 # ==============================================================================
 
 set -euo pipefail
 
-ROUTER_HOST="${ROUTER_HOST:-192.168.50.1}"
-ROUTER_USER="${ROUTER_USER:-yano}"
 WATCH_DIR="${WATCH_DIR:-${HOME}/.local/share/opencode/log}"
 PATTERN="${PATTERN:-used today.*free messages|free usage limit reached|connection lost due to|ECONNRESET|429|rate[- ]?limit|quota[- ]?exceeded|resource_exhausted}"
-MAX_DAILY_RECOVERIES="${MAX_DAILY_RECOVERIES:-10}"
-STATE_FILE="${STATE_FILE:-/tmp/opencode-client-watchdog.state}"
+LIMIT_STATE_FILE="${LIMIT_STATE_FILE:-/tmp/opencode-client-watchdog.limited}"
 EVENT_FIFO="${EVENT_FIFO:-${HOME}/.local/state/opencode/client-watchdog-events.fifo}"
 TMUX_TARGET="${TMUX_TARGET:-opencode}"
 TMUX_AUTO_RETRY="${TMUX_AUTO_RETRY:-true}"
+AUTO_REFACTOR_ON_IDLE="${AUTO_REFACTOR_ON_IDLE:-true}"
 TMUX_RETRY_PROMPT="${TMUX_RETRY_PROMPT:-Please retry the previous request.}"
 TMUX_REFACTOR_PROMPT="${TMUX_REFACTOR_PROMPT:-Perform one conservative, behavior-preserving refactoring pass on the current project. Make only small, clearly beneficial changes; do not change behavior or public interfaces, and do not commit or push. Run relevant tests and summarize the result. If no safe refactor is obvious, make no changes and explain why.}"
 
 echo "=========================================================="
-echo " OpenCode Client Watchdog -> Bastion Router (${ROUTER_HOST})"
+echo " OpenCode Client Watchdog"
 echo "=========================================================="
 echo "Target Log Directory : ${WATCH_DIR}"
-echo "Daily Recovery Cap   : ${MAX_DAILY_RECOVERIES} times / day"
-echo "Router Target        : ${ROUTER_USER}@${ROUTER_HOST}"
-echo "tmux Auto-Retry      : ${TMUX_AUTO_RETRY} (target: '${TMUX_TARGET}', interrupt: 'Escape Escape')"
+echo "Auto-refactor on idle: ${AUTO_REFACTOR_ON_IDLE} (target: '${TMUX_TARGET}')"
 echo ""
 
 mkdir -p "$(dirname "${EVENT_FIFO}")"
@@ -44,29 +40,22 @@ handle_notification_events() {
   while true; do
     while IFS= read -r event; do
       if [ "${event}" = "done" ]; then
-        if selected_action=$(timeout 120s ssh -T -o BatchMode=yes -o ConnectTimeout=5 opencode-home-notify); then
-          case "${selected_action}" in
-            continue)
-              echo "[watchdog] Manual follow-up selected; OpenCode remains idle for your next prompt."
-              ;;
-            refactor)
-              if tmux has-session -t "${TMUX_TARGET}" 2>/dev/null; then
-                tmux send-keys -t "${TMUX_TARGET}" -l "${TMUX_REFACTOR_PROMPT}"
-                tmux send-keys -t "${TMUX_TARGET}" Enter
-                echo "[watchdog] Auto-refactoring selected; sent one bounded refactoring task to '${TMUX_TARGET}'."
-              else
-                echo "[watchdog] Auto-refactoring selected, but tmux session '${TMUX_TARGET}' is unavailable." >&2
-              fi
-              ;;
-            manual|"")
-              echo "[watchdog] Completion left idle."
-              ;;
-            *)
-              echo "[watchdog] [ERROR] Ignoring unknown notification action." >&2
-              ;;
-          esac
-        else
+        if ! timeout 15s ssh -T -o BatchMode=yes -o ConnectTimeout=5 opencode-home-notify done; then
           echo "[watchdog] [ERROR] Failed to send OpenCode completion notification." >&2
+        fi
+
+        if [ "$(cat "${LIMIT_STATE_FILE}" 2>/dev/null || true)" = "${watchdog_run_id}" ]; then
+          echo "[watchdog] Usage-limit pause is active; leaving OpenCode idle until the watchdog is restarted."
+        elif [ "${AUTO_REFACTOR_ON_IDLE}" = "true" ]; then
+          if tmux has-session -t "${TMUX_TARGET}" 2>/dev/null; then
+            tmux send-keys -t "${TMUX_TARGET}" -l "${TMUX_REFACTOR_PROMPT}"
+            tmux send-keys -t "${TMUX_TARGET}" Enter
+            echo "[watchdog] Auto-refactoring; sent one bounded refactoring task to '${TMUX_TARGET}'."
+          else
+            echo "[watchdog] Auto-refactoring is enabled, but tmux session '${TMUX_TARGET}' is unavailable." >&2
+          fi
+        else
+          echo "[watchdog] Completion left idle (AUTO_REFACTOR_ON_IDLE=false)."
         fi
       else
         echo "[watchdog] [ERROR] Ignoring unknown notification event." >&2
@@ -75,6 +64,7 @@ handle_notification_events() {
   done
 }
 
+watchdog_run_id=$$
 handle_notification_events &
 notification_listener_pid=$!
 
@@ -85,63 +75,22 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 0' INT TERM
 
-get_daily_count() {
-  local today
-  today=$(date +%F)
-  if [ -f "${STATE_FILE}" ]; then
-    local saved_date saved_count
-    read -r saved_date saved_count < "${STATE_FILE}" 2>/dev/null || true
-    if [ "${saved_date:-}" = "${today}" ]; then
-      echo "${saved_count:-0}"
-      return
-    fi
-  fi
-  echo "0"
-}
-
-set_daily_count() {
-  local count="$1"
-  local today
-  today=$(date +%F)
-  echo "${today} ${count}" > "${STATE_FILE}" 2>/dev/null || true
-}
-
 # ==============================================================================
 # Startup connectivity check
 # ==============================================================================
 echo "[watchdog] --- Startup Check ---"
-ALL_OK=true
 
-# 1. SSH connection to router
-if ssh -o BatchMode=yes -o ConnectTimeout=5 "${ROUTER_USER}@${ROUTER_HOST}" "exit" 2>/dev/null; then
-  echo "[watchdog] SSH connection to router .............. OK ✓"
-else
-  echo "[watchdog] SSH connection to router .............. FAIL ✗"
-  echo "[watchdog]   → ssh-copy-id ${ROUTER_USER}@${ROUTER_HOST} を実行してSSH鍵を登録してください"
-  ALL_OK=false
-fi
-
-# 2. renew-wan-ip command exists on router
-if ssh -o BatchMode=yes -o ConnectTimeout=5 "${ROUTER_USER}@${ROUTER_HOST}" "command -v renew-wan-ip" 2>/dev/null; then
-  echo "[watchdog] renew-wan-ip on router ................ OK ✓"
-else
-  echo "[watchdog] renew-wan-ip on router ................ FAIL ✗"
-  echo "[watchdog]   → ルーターで make switch が完了しているか確認してください"
-  ALL_OK=false
-fi
-
-# 3. tmux session check
-if [ "${TMUX_AUTO_RETRY}" = "true" ]; then
+# 1. tmux session check
+if [ "${AUTO_REFACTOR_ON_IDLE}" = "true" ] || [ "${TMUX_AUTO_RETRY}" = "true" ]; then
   if command -v tmux >/dev/null 2>&1 && tmux has-session -t "${TMUX_TARGET}" 2>/dev/null; then
     echo "[watchdog] tmux session '${TMUX_TARGET}' .............. OK ✓"
   else
     echo "[watchdog] tmux session '${TMUX_TARGET}' .............. WARN ⚠"
-    echo "[watchdog]   → tmux new -s ${TMUX_TARGET} でOpenCodeを起動するとAuto-Retryが有効になります"
-    echo "[watchdog]   → セッションがなければ、レート制限を検知した際のEnter自動送信はスキップされます"
+    echo "[watchdog]   → tmux new -s ${TMUX_TARGET} でOpenCodeを起動すると自動処理が有効になります"
   fi
 fi
 
-# 4. OpenCode log directory check
+# 2. OpenCode log directory check
 if [ -d "${WATCH_DIR}" ]; then
   echo "[watchdog] OpenCode log directory ................ OK ✓"
 else
@@ -150,12 +99,7 @@ else
 fi
 
 echo "[watchdog] ----------------------"
-if [ "${ALL_OK}" = "true" ]; then
-  echo "[watchdog] All systems ready! 🚀"
-else
-  echo "[watchdog] Some checks failed. 上記を確認してから再起動することをおすすめします。"
-  echo "[watchdog] （このまま続行することも可能です）"
-fi
+echo "[watchdog] Ready. 🚀"
 echo ""
 
 # Wait until target directory exists
@@ -166,7 +110,7 @@ if [ ! -d "${WATCH_DIR}" ]; then
   done
 fi
 
-echo "[watchdog] Active. Monitoring logs for rate-limit/quota responses..."
+echo "[watchdog] Active. Monitoring logs for connection and usage-limit errors..."
 
 while true; do
   LATEST_LOG=$(ls -t "${WATCH_DIR}"/*.log 2>/dev/null | head -n 1 || true)
@@ -175,42 +119,11 @@ while true; do
     while IFS= read -r line; do
       if echo "$line" | grep -qiE "${PATTERN}"; then
         echo ""
-        recovery_ready=false
-
         if echo "$line" | grep -qiE 'connection lost due to|ECONNRESET'; then
           echo "[watchdog] Connection error detected; skipping WAN IP renewal."
           notify-send "OpenCode Watchdog" "通信エラーを検知しました。IP更新なしで再試行します。" 2>/dev/null || true
-          recovery_ready=true
-        else
-          current_count=$(get_daily_count)
-
-          if [ "${current_count}" -ge "${MAX_DAILY_RECOVERIES}" ]; then
-            echo "[watchdog] [SAFETY CAP] Daily limit reached (${current_count}/${MAX_DAILY_RECOVERIES})."
-            echo "[watchdog] Halting auto-recovery for today to avoid excessive DHCP/MAC churn."
-            notify-send -u critical "OpenCode Watchdog" "1日の自動復旧上限（${MAX_DAILY_RECOVERIES}回）に達しました。本日の自動IP更新を停止します。" 2>/dev/null || true
-            sleep 60
-            break
-          fi
-
-          echo "[watchdog] Rate-limit/quota response detected; renewing WAN IP on router (${ROUTER_HOST})..."
-          notify-send "OpenCode Watchdog" "利用制限を検知: ルーターのWAN IP更新を開始します..." 2>/dev/null || true
-
-          if ssh -o BatchMode=yes -o ConnectTimeout=5 "${ROUTER_USER}@${ROUTER_HOST}" "renew-wan-ip"; then
-            new_count=$((current_count + 1))
-            set_daily_count "${new_count}"
-
-            echo "[watchdog] WAN IP successfully renewed! (${new_count}/${MAX_DAILY_RECOVERIES} today)."
-            notify-send -u normal "OpenCode Watchdog" "WAN IP更新完了 (${new_count}/${MAX_DAILY_RECOVERIES}回目)。接続が復旧しました。" 2>/dev/null || true
-            printf '\a' # Beep
-            recovery_ready=true
-          else
-            echo "[watchdog] [ERROR] Failed to execute renew-wan-ip on router via SSH."
-            notify-send -u critical "OpenCode Watchdog" "ルーターへのSSH接続またはIP更新に失敗しました。" 2>/dev/null || true
-          fi
-        fi
-
-        if [ "${recovery_ready}" = "true" ] && [ "${TMUX_AUTO_RETRY}" = "true" ] && command -v tmux >/dev/null 2>&1; then
-          if tmux has-session -t "${TMUX_TARGET}" 2>/dev/null; then
+          if [ "${TMUX_AUTO_RETRY}" = "true" ] && command -v tmux >/dev/null 2>&1 &&
+            tmux has-session -t "${TMUX_TARGET}" 2>/dev/null; then
             echo "[watchdog] Auto-retry: Interrupting and sending retry prompt to tmux session '${TMUX_TARGET}'..."
             sleep 2
             tmux send-keys -t "${TMUX_TARGET}" Escape Escape
@@ -218,6 +131,17 @@ while true; do
             tmux send-keys -l -t "${TMUX_TARGET}" "${TMUX_RETRY_PROMPT}"
             sleep 0.5
             tmux send-keys -t "${TMUX_TARGET}" Enter
+          fi
+        else
+          if [ "$(cat "${LIMIT_STATE_FILE}" 2>/dev/null || true)" != "${watchdog_run_id}" ]; then
+            printf '%s\n' "${watchdog_run_id}" > "${LIMIT_STATE_FILE}"
+            echo "[watchdog] Provider usage/rate limit detected; notifying and pausing automatic refactoring."
+            notify-send -u critical "OpenCode Watchdog" "OpenCodeの利用上限/レート制限を検知しました。自動再試行はせず停止します。" 2>/dev/null || true
+            if ! timeout 15s ssh -T -o BatchMode=yes -o ConnectTimeout=5 opencode-home-notify limit; then
+              echo "[watchdog] [ERROR] Failed to send usage-limit notification to the home PC." >&2
+            fi
+          else
+            echo "[watchdog] Usage-limit notification already sent for this watchdog run."
           fi
         fi
 

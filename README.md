@@ -124,39 +124,26 @@ renew-wan-ip
 ### Client Watchdog (Run on your Linux PC)
 
 `scripts/client-watchdog.sh` runs on your **client Linux machine** (the one running OpenCode).
-It watches local OpenCode logs for rate-limit/quota responses (`429`, `resource_exhausted`, `used today`, etc.), then SSH-triggers `renew-wan-ip` on the router.
+It watches local OpenCode logs for connection and provider usage-limit errors.
 
-For `ECONNRESET` or `Connection lost due to` errors, it skips WAN renewal and retries OpenCode. For rate-limit/quota errors, it renews the WAN IP first, then retries.
+For `ECONNRESET` or `Connection lost due to` errors, it skips WAN renewal and retries OpenCode. Provider rate limits and quota errors trigger a notification to the home PC and pause automatic refactoring for that watchdog run; they do not renew the WAN IP or retry the request.
 
 #### Setup (one-time)
 
-**Step 1 — Register your SSH key on the router** (from your client PC):
-```bash
-ssh-copy-id yano@192.168.50.1
-```
-
-**Step 2 — Copy the watchdog script to your client PC**:
-```bash
-scp yano@192.168.50.1:/etc/nixos/scripts/client-watchdog.sh .
-chmod +x client-watchdog.sh
-```
-
-**Step 3 — Start OpenCode inside a named tmux session**:
+**Step 1 — Start OpenCode inside a named tmux session**:
 ```bash
 tmux new -s opencode
 # (inside the session)
 opencode
 ```
 
-**Step 4 — Run the watchdog in another terminal or tmux pane**:
+**Step 2 — Run the watchdog in another terminal or tmux pane**:
 ```bash
-./client-watchdog.sh
+./scripts/client-watchdog.sh
 ```
 
-On startup, the watchdog runs a self-check and prints:
+On startup, the watchdog checks the tmux session and OpenCode log directory:
 ```
-[watchdog] SSH connection to router .............. OK ✓
-[watchdog] renew-wan-ip on router ................ OK ✓
 [watchdog] tmux session 'opencode' ............... OK ✓
 [watchdog] OpenCode log directory ................ OK ✓
 [watchdog] All systems ready! 🚀
@@ -165,30 +152,27 @@ On startup, the watchdog runs a self-check and prints:
 #### What happens when an error is detected
 
 1. Watchdog detects an error in the OpenCode log
-2. For `ECONNRESET` or `Connection lost due to`, it skips WAN renewal. For rate-limit/quota errors, it SSH-triggers `renew-wan-ip` on the router.
-3. If renewed, the router reconnects with a randomized MAC and waits for internet connectivity.
-4. Watchdog sends `Escape` twice, types the retry prompt, and presses `Enter` in the `opencode` tmux session.
+2. For connection errors, it skips WAN renewal and retries OpenCode in tmux.
+3. For provider usage limits, it notifies both the client and home PC, then stops automatic retries/refactoring for the current watchdog run.
 
 #### Configuration via environment variables
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `ROUTER_HOST` | `192.168.50.1` | Router LAN IP |
-| `ROUTER_USER` | `yano` | SSH user on the router |
 | `TMUX_TARGET` | `opencode` | tmux session name where OpenCode runs |
-| `TMUX_AUTO_RETRY` | `true` | Automatically interrupt and retry in tmux after recovery |
-| `TMUX_RETRY_PROMPT` | `Please retry the previous request.` | Prompt sent to OpenCode after interrupting |
-| `MAX_DAILY_RECOVERIES` | `10` | Safety cap: max auto-recoveries per day |
+| `TMUX_AUTO_RETRY` | `true` | Automatically retry connection errors in tmux |
+| `AUTO_REFACTOR_ON_IDLE` | `true` | Automatically start one bounded refactoring pass each time a session becomes idle |
+| `TMUX_RETRY_PROMPT` | `Please retry the previous request.` | Prompt sent to OpenCode after a connection error |
 | `WATCH_DIR` | `~/.local/share/opencode/log` | OpenCode log directory to monitor |
 
 ```bash
-# Example: custom session name and higher daily cap
-TMUX_TARGET=mywork MAX_DAILY_RECOVERIES=20 ./client-watchdog.sh
+# Example: use a custom OpenCode tmux session
+TMUX_TARGET=mywork ./client-watchdog.sh
 ```
 
 ### Notify your home PC when OpenCode finishes
 
-OpenCode can send a desktop notification to the Arch PC at home when a session becomes idle. This uses the OpenCode `session.idle` event and a direct SSH connection over Tailscale. Only a fixed `done` event is sent; prompts and generated content are not transmitted.
+OpenCode can send a desktop notification to the Arch PC at home when a session becomes idle or a provider limit is detected. This uses the OpenCode `session.idle` event and a direct SSH connection over Tailscale. Only fixed `done` and `limit` event labels are sent; prompts and generated content are not transmitted.
 
 Run this **once from your home Arch PC**, replacing `opencode-work` with your existing SSH alias and `/path/to/clubroom-router-nixos` with the repository path on the OpenCode PC:
 
@@ -197,11 +181,11 @@ ssh opencode-work 'cat /path/to/clubroom-router-nixos/scripts/setup-opencode-hom
   | bash -s -- opencode-work /path/to/clubroom-router-nixos
 ```
 
-The setup creates a notification-only SSH key, installs the OpenCode event hook and updated watchdog script, and writes a forced `notify-send` command into the home PC's `authorized_keys`; there is no receiver script to run. It configures direct SSH to the home PC's Tailscale IP. No reverse forwarding, port conflict, or background tunnel service is needed. It also removes the old notification reverse-forward setting from the work SSH alias. OpenCode signals the already-running `client-watchdog.sh` through a FIFO when a session becomes idle; the watchdog sends the desktop notification. Its existing quota/IP-recovery behavior is unchanged.
+The setup creates a notification-only SSH key, installs the OpenCode event hook and updated watchdog script, and installs a restricted notification receiver on the home PC. Only fixed `done` and `limit` notification events are accepted. It configures direct SSH to the home PC's Tailscale IP. No reverse forwarding, port conflict, or background tunnel service is needed. It also removes the old notification reverse-forward setting from the work SSH alias.
 
-The notification offers **次の指示を手動で入力**, **完了・放置**, and **Auto-refactoring** actions. The first leaves the session ready for your next prompt; the second leaves it idle. **Auto-refactoring** sends one bounded, behavior-preserving refactoring task, asks OpenCode to test and summarize it, and does not commit or push. After that pass finishes, a new completion notification lets you decide what to do next. Dismissing the notification leaves the session idle. The notification desktop must support actions (for example, GNOME Shell or KDE Plasma).
+OpenCode signals the already-running `client-watchdog.sh` through a FIFO when a session becomes idle. The watchdog notifies the home PC, then automatically sends one conservative, behavior-preserving refactoring task to the `opencode` tmux session. Each completed pass triggers another notification and another pass. Refactoring is paused when a provider usage limit is detected; after the limit is available again, restart the watchdog to resume.
 
-On the OpenCode PC, restart the watchdog once so it uses the updated script, and restart OpenCode once to load the event hook. Keep running the watchdog as you normally do. Both PCs need to be online in Tailscale, and the home PC must be logged into its graphical session. WAN reconnects can interrupt SSH to the work PC, but the watchdog can reconnect to the home PC directly after Tailscale is back.
+On the OpenCode PC, restart the watchdog and OpenCode once to load the changes. Keep running the watchdog as usual. Both PCs need to be online in Tailscale, and the home PC must be logged into its graphical session. WAN reconnects can interrupt SSH to the work PC, but the watchdog can reconnect to the home PC directly after Tailscale is back.
 
 #### Reconnecting to the work PC from your home Arch PC
 

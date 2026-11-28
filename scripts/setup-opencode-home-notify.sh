@@ -117,6 +117,21 @@ if ! command -v notify-send >/dev/null 2>&1; then
   sudo pacman -S --needed libnotify
 fi
 
+echo "Installing the restricted notification receiver..."
+receiver_tmp="$(mktemp)"
+if ! ssh "${work_alias}" bash -s -- "${remote_repo}" > "$receiver_tmp" <<'REMOTE'
+set -euo pipefail
+repo="$1"
+cat "$repo/scripts/opencode-notify-receiver"
+REMOTE
+then
+  rm -f "$receiver_tmp"
+  echo "Could not retrieve the notification receiver from ${work_alias}." >&2
+  exit 1
+fi
+install -Dm755 "$receiver_tmp" "${HOME}/.local/bin/opencode-notify-receiver"
+rm -f "$receiver_tmp"
+
 if ! systemctl is-enabled --quiet sshd || ! systemctl is-active --quiet sshd; then
   sudo systemctl enable --now sshd
 fi
@@ -128,10 +143,9 @@ tmp_authorized_keys="$(mktemp)"
 awk -v key="$public_key" 'index($0, key) == 0' "$authorized_keys" > "$tmp_authorized_keys"
 cat "$tmp_authorized_keys" > "$authorized_keys"
 rm -f "$tmp_authorized_keys"
-notify_command="/usr/bin/env XDG_RUNTIME_DIR=/run/user/\$(/usr/bin/id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/\$(/usr/bin/id -u)/bus /usr/bin/notify-send --app-name=OpenCode --action=continue=次の指示を手動で入力 --action=manual=完了・放置 --action=refactor=Auto-refactoring '作業完了' 'OpenCodeの応答が完了しました。'"
-printf 'command="%s",restrict %s\n' "$notify_command" "$public_key" >> "$authorized_keys"
+printf 'command="%s",restrict %s\n' "${HOME}/.local/bin/opencode-notify-receiver" "$public_key" >> "$authorized_keys"
 
 echo
 echo "Setup complete."
 echo "Notifications connect directly to this PC over Tailscale; no SSH port forwarding is used."
-echo "Restart OpenCode on the remote PC once to load the plugin."
+echo "Restart the watchdog and OpenCode on the remote PC to load the changes."
