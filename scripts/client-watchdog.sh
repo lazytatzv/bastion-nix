@@ -9,6 +9,19 @@
 
 set -euo pipefail
 
+if [ "${1:-}" = "--notify-done" ]; then
+  if [ "$#" -ne 1 ]; then
+    echo "Usage: client-watchdog.sh --notify-done" >&2
+    exit 2
+  fi
+
+  printf 'done\n' | ssh -T -o BatchMode=yes -o ConnectTimeout=5 opencode-home-notify
+  exit $?
+elif [ "$#" -ne 0 ]; then
+  echo "Usage: client-watchdog.sh [--notify-done]" >&2
+  exit 2
+fi
+
 ROUTER_HOST="${ROUTER_HOST:-192.168.50.1}"
 ROUTER_USER="${ROUTER_USER:-yano}"
 WATCH_DIR="${WATCH_DIR:-${HOME}/.local/share/opencode/log}"

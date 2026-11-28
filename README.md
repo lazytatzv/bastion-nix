@@ -202,7 +202,7 @@ ssh opencode-work 'cat /path/to/clubroom-router-nixos/scripts/setup-opencode-hom
   | bash -s -- opencode-work /path/to/clubroom-router-nixos
 ```
 
-The setup creates a notification-only SSH key, installs the receiver and OpenCode plugin, and configures the reverse tunnel. It preserves existing SSH keys and config entries. On the OpenCode PC, restart OpenCode once to load the plugin.
+The setup creates a notification-only SSH key, installs the receiver, the OpenCode event hook, and the watchdog script, then configures the reverse tunnel. It preserves existing SSH keys and config entries. OpenCode invokes `client-watchdog.sh --notify-done` on the `session.idle` event, so the existing watchdog script owns the notification send. On the OpenCode PC, restart OpenCode once to load the event hook.
 
 After setup, the everyday routine is just this on the home PC:
 
@@ -210,7 +210,7 @@ After setup, the everyday routine is just this on the home PC:
 ~/.local/bin/ssh-opencode-work
 ```
 
-Keep that SSH window connected while using OpenCode. The plugin starts automatically with OpenCode; no separate script needs to run on the OpenCode PC. The home PC needs an active graphical login session to show notifications. The setup script installs `libnotify` if missing and enables `sshd`.
+Keep that SSH window connected while using OpenCode. OpenCode starts the event hook automatically; no separate watchdog or notification script needs to be started for notifications. The home PC needs an active graphical login session to show notifications. The setup script installs `libnotify` if missing and enables `sshd`.
 
 #### Manual on-demand lease renewal (from your client PC)
 

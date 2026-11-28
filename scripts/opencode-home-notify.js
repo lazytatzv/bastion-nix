@@ -13,13 +13,13 @@ export default Plugin.define({
         })) {
           if (event.type !== "session.idle") continue
 
-          const child = Bun.spawn(["ssh", "-T", "opencode-home-notify"], {
-            stdin: "pipe",
-            stdout: "ignore",
-            stderr: "pipe",
-          })
-          child.stdin.write("done\n")
-          child.stdin.end()
+          const child = Bun.spawn(
+            [`${process.env.HOME}/.local/bin/client-watchdog.sh`, "--notify-done"],
+            {
+              stdout: "ignore",
+              stderr: "pipe",
+            },
+          )
 
           const exitCode = await child.exited
           if (exitCode !== 0) {

@@ -20,7 +20,7 @@ trap 'rm -f "$tmp_receiver"' EXIT
 echo "Checking SSH access to ${work_alias}..."
 ssh -o BatchMode=yes -o ConnectTimeout=5 "${work_alias}" true
 
-echo "Installing notification plugin and key on the OpenCode PC..."
+echo "Installing watchdog notification mode, plugin, and key on the OpenCode PC..."
 public_key="$(
   ssh "${work_alias}" bash -s -- "${remote_repo}" "${home_user}" <<'REMOTE'
 set -euo pipefail
@@ -35,6 +35,8 @@ if [ ! -f "$key" ]; then
 fi
 install -m 644 "$repo/scripts/opencode-home-notify.js" \
   "$HOME/.config/opencode/plugins/opencode-home-notify.js"
+install -Dm755 "$repo/scripts/client-watchdog.sh" \
+  "$HOME/.local/bin/client-watchdog.sh"
 touch "$ssh_config"
 chmod 600 "$ssh_config"
 if ! grep -Eq '^[[:space:]]*Host[[:space:]]+opencode-home-notify([[:space:]]|$)' "$ssh_config"; then
