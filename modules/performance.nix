@@ -29,7 +29,6 @@ in {
     boot.kernelParams = [
       "cpufreq.default_governor=performance"
       "intel_pstate=active"
-      "mitigations=off"
       "tsc=reliable"
       "clocksource=tsc"
       "nowatchdog"

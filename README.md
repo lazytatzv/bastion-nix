@@ -162,7 +162,7 @@ The host firewall scopes application service ports to the LAN (`enp2s0`) and Tai
 
 The monitoring module configures Node Exporter on localhost port 9100, Prometheus on localhost port 9090 with 30-day retention, and Grafana on localhost port 3100. Caddy exposes Grafana on the LAN.
 
-The performance module selects the Zen kernel by default, configures BBR and CAKE, uses a RAM-backed `/tmp` (default 16 GiB), enables zram, and tunes CPU, VM, and I/O settings. It also sets the kernel parameter `mitigations=off`; this trades security mitigations for performance and should be reviewed before reusing this profile on a machine that handles untrusted workloads or sensitive data.
+The performance module selects the Zen kernel by default, configures BBR and CAKE, uses a RAM-backed `/tmp` (default 16 GiB), enables zram, and tunes CPU, VM, and I/O settings. CPU vulnerability mitigations are left at the kernel defaults.
 
 ## OpenCode client watchdog
 
