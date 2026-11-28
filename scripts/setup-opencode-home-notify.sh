@@ -12,10 +12,15 @@ home_user="$(id -un)"
 receiver_path="${HOME}/.local/bin/opencode-notify-receiver"
 authorized_keys="${HOME}/.ssh/authorized_keys"
 ssh_config="${HOME}/.ssh/config"
-key_file="${HOME}/.ssh/opencode_notify_home"
-launcher="${HOME}/.local/bin/ssh-opencode-work"
+service_dir="${HOME}/.config/systemd/user"
+service_file="${service_dir}/opencode-home-tunnel.service"
 tmp_receiver="$(mktemp)"
 trap 'rm -f "$tmp_receiver"' EXIT
+
+if [[ ! "$work_alias" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "WORK_SSH_ALIAS may contain only letters, numbers, dots, underscores, and hyphens." >&2
+  exit 2
+fi
 
 echo "Checking SSH access to ${work_alias}..."
 ssh -o BatchMode=yes -o ConnectTimeout=5 "${work_alias}" true
@@ -105,19 +110,26 @@ SSH_CONFIG
   sed -i "s/__HOME_USER__/${home_user}/" "$ssh_config"
 fi
 
-install -d -m 755 "${HOME}/.local/bin"
-cat > "$launcher" <<LAUNCHER
-#!/usr/bin/env bash
-set -euo pipefail
-exec ssh -o RemoteForward=127.0.0.1:2222:127.0.0.1:22 \\
-  -o ExitOnForwardFailure=yes \\
-  -o ServerAliveInterval=30 \\
-  -o ServerAliveCountMax=3 \\
-  "${work_alias}" "\$@"
-LAUNCHER
-chmod 755 "$launcher"
+install -d -m 755 "$service_dir"
+cat > "$service_file" <<UNIT
+[Unit]
+Description=Persistent reverse SSH tunnel for OpenCode home notifications
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/ssh -N -o RemoteForward=127.0.0.1:2222:127.0.0.1:22 -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 ${work_alias}
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+UNIT
+
+systemctl --user daemon-reload
+systemctl --user enable --now opencode-home-tunnel.service
 
 echo
 echo "Setup complete."
-echo "Start the work connection with: ${launcher}"
-echo "Keep it open, then restart OpenCode on the remote PC to load the plugin."
+echo "The notification tunnel is running and will reconnect automatically."
+echo "Restart OpenCode on the remote PC once to load the plugin."
