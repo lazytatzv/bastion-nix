@@ -40,17 +40,19 @@ fi
 chmod 600 "${EVENT_FIFO}"
 
 handle_notification_events() {
-  while IFS= read -r event; do
-    if [ "${event}" = "done" ]; then
-      if ssh -T -o BatchMode=yes -o ConnectTimeout=5 opencode-home-notify; then
-        echo "[watchdog] OpenCode completion notification sent."
+  while true; do
+    while IFS= read -r event; do
+      if [ "${event}" = "done" ]; then
+        if ssh -T -o BatchMode=yes -o ConnectTimeout=5 opencode-home-notify; then
+          echo "[watchdog] OpenCode completion notification sent."
+        else
+          echo "[watchdog] [ERROR] Failed to send OpenCode completion notification." >&2
+        fi
       else
-        echo "[watchdog] [ERROR] Failed to send OpenCode completion notification." >&2
+        echo "[watchdog] [ERROR] Ignoring unknown notification event." >&2
       fi
-    else
-      echo "[watchdog] [ERROR] Ignoring unknown notification event." >&2
-    fi
-  done < "${EVENT_FIFO}"
+    done < "${EVENT_FIFO}"
+  done
 }
 
 handle_notification_events &

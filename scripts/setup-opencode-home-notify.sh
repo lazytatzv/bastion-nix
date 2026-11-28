@@ -108,13 +108,46 @@ SSH_CONFIG
   sed -i "s/__HOME_USER__/${home_user}/" "$ssh_config"
 fi
 
-if ! grep -Fq 'RemoteForward 127.0.0.1:2222 127.0.0.1:22' "$ssh_config"; then
+if ! awk -v alias="$work_alias" '
+  tolower($1) == "host" {
+    for (i = 2; i <= NF; i++) if ($i == alias) found = 1
+  }
+  END { exit !found }
+' "$ssh_config"; then
   cat >> "$ssh_config" <<SSH_CONFIG
 
 Host ${work_alias}
   RemoteForward 127.0.0.1:2222 127.0.0.1:22
   ExitOnForwardFailure yes
 SSH_CONFIG
+elif ! awk -v alias="$work_alias" '
+  tolower($1) == "host" {
+    target = 0
+    for (i = 2; i <= NF; i++) if ($i == alias) target = 1
+    next
+  }
+  target && tolower($1) == "remoteforward" &&
+    $2 == "127.0.0.1:2222" && $3 == "127.0.0.1:22" { found = 1 }
+  END { exit !found }
+' "$ssh_config"; then
+  tmp_ssh_config="$(mktemp)"
+  awk -v alias="$work_alias" '
+    tolower($1) == "host" {
+      target = 0
+      for (i = 2; i <= NF; i++) if ($i == alias) target = 1
+      print
+      if (target && !inserted) {
+        print "  RemoteForward 127.0.0.1:2222 127.0.0.1:22"
+        print "  ExitOnForwardFailure yes"
+        inserted = 1
+      }
+      next
+    }
+    { print }
+    END { if (!inserted) exit 1 }
+  ' "$ssh_config" > "$tmp_ssh_config"
+  chmod 600 "$tmp_ssh_config"
+  mv "$tmp_ssh_config" "$ssh_config"
 fi
 
 echo
