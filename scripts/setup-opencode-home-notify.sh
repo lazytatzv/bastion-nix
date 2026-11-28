@@ -75,7 +75,9 @@ if ! command -v notify-send >/dev/null 2>&1; then
   sudo pacman -S --needed libnotify
 fi
 
-sudo systemctl enable --now sshd
+if ! systemctl is-enabled --quiet sshd || ! systemctl is-active --quiet sshd; then
+  sudo systemctl enable --now sshd
+fi
 install -d -m 700 "$(dirname "$authorized_keys")"
 touch "$authorized_keys"
 chmod 600 "$authorized_keys"
