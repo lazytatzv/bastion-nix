@@ -197,9 +197,9 @@ ssh opencode-work 'cat /path/to/clubroom-router-nixos/scripts/setup-opencode-hom
   | bash -s -- opencode-work /path/to/clubroom-router-nixos
 ```
 
-The setup creates a notification-only SSH key, installs the OpenCode event hook and updated watchdog script, and writes a forced `notify-send` command into the home PC's `authorized_keys`; there is no receiver script to run. It then enables a user systemd service that keeps the reverse SSH tunnel connected and reconnects automatically. Existing SSH keys and config entries are preserved. OpenCode signals the already-running `client-watchdog.sh` through a FIFO when a session becomes idle; the watchdog sends the desktop notification. Its existing quota/IP-recovery behavior is unchanged.
+The setup creates a notification-only SSH key, installs the OpenCode event hook and updated watchdog script, and writes a forced `notify-send` command into the home PC's `authorized_keys`; there is no receiver script to run. It adds reverse forwarding to your existing SSH alias instead of creating a background service. Existing SSH keys and config entries are preserved. OpenCode signals the already-running `client-watchdog.sh` through a FIFO when a session becomes idle; the watchdog sends the desktop notification. Its existing quota/IP-recovery behavior is unchanged.
 
-On the OpenCode PC, restart the watchdog once so it uses the updated script, and restart OpenCode once to load the event hook. Keep running the watchdog as you normally do. The tunnel service starts when your home PC user session starts. The home PC must be logged into its graphical desktop for notifications to appear. Check the tunnel with `systemctl --user status opencode-home-tunnel.service`.
+On the OpenCode PC, restart the watchdog once so it uses the updated script, and restart OpenCode once to load the event hook. Keep running the watchdog as you normally do. After setup, use your normal `ssh opencode-work` connection; it now carries the notification tunnel while connected. The home PC must be logged into its graphical desktop for notifications to appear.
 
 #### Manual on-demand lease renewal (from your client PC)
 
