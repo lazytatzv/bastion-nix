@@ -124,13 +124,9 @@ renew-wan-ip
 ### Client Watchdog (Run on your Linux PC)
 
 `scripts/client-watchdog.sh` runs on your **client Linux machine** (the one running OpenCode).
-It watches local OpenCode logs for rate-limit/quota responses (`429`, `resource_exhausted`, `used today`, etc.). To prevent log matches from unexpectedly changing the WAN IP or interrupting SSH, WAN renewal and tmux auto-retry are disabled by default.
+It watches local OpenCode logs for rate-limit/quota responses (`429`, `resource_exhausted`, `used today`, etc.), then SSH-triggers `renew-wan-ip` on the router.
 
-For `ECONNRESET` or `Connection lost due to` errors, it skips WAN renewal. Enable disruptive WAN renewal and tmux retry explicitly only when desired:
-
-```bash
-WAN_AUTO_RENEW=true TMUX_AUTO_RETRY=true ./client-watchdog.sh
-```
+For `ECONNRESET` or `Connection lost due to` errors, it skips WAN renewal and retries OpenCode. For rate-limit/quota errors, it renews the WAN IP first, then retries.
 
 #### Setup (one-time)
 
@@ -169,9 +165,9 @@ On startup, the watchdog runs a self-check and prints:
 #### What happens when an error is detected
 
 1. Watchdog detects an error in the OpenCode log
-2. WAN renewal is skipped by default. When `WAN_AUTO_RENEW=true`, rate-limit/quota matches SSH-trigger `renew-wan-ip` on the router. `ECONNRESET` and `Connection lost due to` never trigger WAN renewal.
-3. If renewal is enabled, the router reconnects with a randomized MAC and reports failure if internet connectivity does not return within 30 seconds.
-4. tmux retry is also disabled by default. When `TMUX_AUTO_RETRY=true`, the watchdog sends `Escape` twice, types the retry prompt, and presses `Enter` in the `opencode` tmux session after a recoverable event.
+2. For `ECONNRESET` or `Connection lost due to`, it skips WAN renewal. For rate-limit/quota errors, it SSH-triggers `renew-wan-ip` on the router.
+3. If renewed, the router reconnects with a randomized MAC and waits for internet connectivity.
+4. Watchdog sends `Escape` twice, types the retry prompt, and presses `Enter` in the `opencode` tmux session.
 
 #### Configuration via environment variables
 
@@ -180,8 +176,7 @@ On startup, the watchdog runs a self-check and prints:
 | `ROUTER_HOST` | `192.168.50.1` | Router LAN IP |
 | `ROUTER_USER` | `yano` | SSH user on the router |
 | `TMUX_TARGET` | `opencode` | tmux session name where OpenCode runs |
-| `WAN_AUTO_RENEW` | `false` | Allow rate-limit/quota matches to disruptively renew the router WAN IP |
-| `TMUX_AUTO_RETRY` | `false` | Automatically interrupt and retry in tmux after a recoverable event |
+| `TMUX_AUTO_RETRY` | `true` | Automatically interrupt and retry in tmux after recovery |
 | `TMUX_RETRY_PROMPT` | `Please retry the previous request.` | Prompt sent to OpenCode after interrupting |
 | `MAX_DAILY_RECOVERIES` | `10` | Safety cap: max auto-recoveries per day |
 | `WATCH_DIR` | `~/.local/share/opencode/log` | OpenCode log directory to monitor |
@@ -202,9 +197,9 @@ ssh opencode-work 'cat /path/to/clubroom-router-nixos/scripts/setup-opencode-hom
   | bash -s -- opencode-work /path/to/clubroom-router-nixos
 ```
 
-The setup creates a notification-only SSH key, installs the receiver, the OpenCode event hook, and the watchdog script, then enables a user systemd service that keeps the reverse SSH tunnel connected and reconnects automatically. It preserves existing SSH keys and config entries. OpenCode invokes `client-watchdog.sh --notify-done` on the `session.idle` event, so the existing watchdog script owns the notification send. On the OpenCode PC, restart OpenCode once to load the event hook. No terminal or notification script needs to be kept open manually.
+The setup creates a notification-only SSH key, installs the receiver, OpenCode event hook, and the updated watchdog script, then enables a user systemd service that keeps the reverse SSH tunnel connected and reconnects automatically. It preserves existing SSH keys and config entries. OpenCode signals the already-running `client-watchdog.sh` through a FIFO when a session becomes idle; the watchdog sends the desktop notification. The same watchdog continues to perform its existing quota/IP-recovery behavior unchanged.
 
-The tunnel service starts when your home PC user session starts. The home PC must be logged into its graphical desktop for notifications to appear. Check the tunnel with `systemctl --user status opencode-home-tunnel.service`.
+On the OpenCode PC, restart the watchdog once so it uses the updated script, and restart OpenCode once to load the event hook. Keep running the watchdog as you normally do. The tunnel service starts when your home PC user session starts. The home PC must be logged into its graphical desktop for notifications to appear. Check the tunnel with `systemctl --user status opencode-home-tunnel.service`.
 
 #### Manual on-demand lease renewal (from your client PC)
 

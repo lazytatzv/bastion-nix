@@ -25,7 +25,7 @@ fi
 echo "Checking SSH access to ${work_alias}..."
 ssh -o BatchMode=yes -o ConnectTimeout=5 "${work_alias}" true
 
-echo "Installing watchdog notification mode, plugin, and key on the OpenCode PC..."
+echo "Installing the watchdog, completion hook, and notification key on the OpenCode PC..."
 public_key="$(
   ssh "${work_alias}" bash -s -- "${remote_repo}" "${home_user}" <<'REMOTE'
 set -euo pipefail

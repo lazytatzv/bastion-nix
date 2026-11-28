@@ -13,13 +13,17 @@ export default Plugin.define({
         })) {
           if (event.type !== "session.idle") continue
 
+          const eventFifo = `${process.env.HOME}/.local/state/opencode/client-watchdog-events.fifo`
           const child = Bun.spawn(
-            [`${process.env.HOME}/.local/bin/client-watchdog.sh`, "--notify-done"],
+            ["timeout", "5", "tee", eventFifo],
             {
+              stdin: "pipe",
               stdout: "ignore",
               stderr: "pipe",
             },
           )
+          child.stdin.write("done\n")
+          child.stdin.end()
 
           const exitCode = await child.exited
           if (exitCode !== 0) {

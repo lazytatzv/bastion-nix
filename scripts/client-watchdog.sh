@@ -9,28 +9,15 @@
 
 set -euo pipefail
 
-if [ "${1:-}" = "--notify-done" ]; then
-  if [ "$#" -ne 1 ]; then
-    echo "Usage: client-watchdog.sh --notify-done" >&2
-    exit 2
-  fi
-
-  printf 'done\n' | ssh -T -o BatchMode=yes -o ConnectTimeout=5 opencode-home-notify
-  exit $?
-elif [ "$#" -ne 0 ]; then
-  echo "Usage: client-watchdog.sh [--notify-done]" >&2
-  exit 2
-fi
-
 ROUTER_HOST="${ROUTER_HOST:-192.168.50.1}"
 ROUTER_USER="${ROUTER_USER:-yano}"
 WATCH_DIR="${WATCH_DIR:-${HOME}/.local/share/opencode/log}"
 PATTERN="${PATTERN:-used today.*free messages|free usage limit reached|connection lost due to|ECONNRESET|429|rate[- ]?limit|quota[- ]?exceeded|resource_exhausted}"
 MAX_DAILY_RECOVERIES="${MAX_DAILY_RECOVERIES:-10}"
 STATE_FILE="${STATE_FILE:-/tmp/opencode-client-watchdog.state}"
+EVENT_FIFO="${EVENT_FIFO:-${HOME}/.local/state/opencode/client-watchdog-events.fifo}"
 TMUX_TARGET="${TMUX_TARGET:-opencode}"
-WAN_AUTO_RENEW="${WAN_AUTO_RENEW:-false}"
-TMUX_AUTO_RETRY="${TMUX_AUTO_RETRY:-false}"
+TMUX_AUTO_RETRY="${TMUX_AUTO_RETRY:-true}"
 TMUX_RETRY_PROMPT="${TMUX_RETRY_PROMPT:-Please retry the previous request.}"
 
 echo "=========================================================="
@@ -39,9 +26,42 @@ echo "=========================================================="
 echo "Target Log Directory : ${WATCH_DIR}"
 echo "Daily Recovery Cap   : ${MAX_DAILY_RECOVERIES} times / day"
 echo "Router Target        : ${ROUTER_USER}@${ROUTER_HOST}"
-echo "WAN Auto-Renew       : ${WAN_AUTO_RENEW}"
 echo "tmux Auto-Retry      : ${TMUX_AUTO_RETRY} (target: '${TMUX_TARGET}', interrupt: 'Escape Escape')"
 echo ""
+
+mkdir -p "$(dirname "${EVENT_FIFO}")"
+if [ -e "${EVENT_FIFO}" ] && [ ! -p "${EVENT_FIFO}" ]; then
+  echo "[watchdog] [ERROR] Notification event path exists and is not a FIFO: ${EVENT_FIFO}" >&2
+  exit 1
+fi
+if [ ! -p "${EVENT_FIFO}" ]; then
+  mkfifo -m 600 "${EVENT_FIFO}"
+fi
+chmod 600 "${EVENT_FIFO}"
+
+handle_notification_events() {
+  while IFS= read -r event; do
+    if [ "${event}" = "done" ]; then
+      if printf 'done\n' | ssh -T -o BatchMode=yes -o ConnectTimeout=5 opencode-home-notify; then
+        echo "[watchdog] OpenCode completion notification sent."
+      else
+        echo "[watchdog] [ERROR] Failed to send OpenCode completion notification." >&2
+      fi
+    else
+      echo "[watchdog] [ERROR] Ignoring unknown notification event." >&2
+    fi
+  done < "${EVENT_FIFO}"
+}
+
+handle_notification_events &
+notification_listener_pid=$!
+
+cleanup() {
+  kill "${notification_listener_pid}" 2>/dev/null || true
+  wait "${notification_listener_pid}" 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 0' INT TERM
 
 get_daily_count() {
   local today
@@ -139,9 +159,6 @@ while true; do
           echo "[watchdog] Connection error detected; skipping WAN IP renewal."
           notify-send "OpenCode Watchdog" "通信エラーを検知しました。IP更新なしで再試行します。" 2>/dev/null || true
           recovery_ready=true
-        elif [ "${WAN_AUTO_RENEW}" != "true" ]; then
-          echo "[watchdog] Rate-limit/quota response detected; WAN renewal is disabled."
-          echo "[watchdog] Set WAN_AUTO_RENEW=true to explicitly allow disruptive WAN renewal."
         else
           current_count=$(get_daily_count)
 
