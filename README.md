@@ -178,6 +178,7 @@ On startup, the watchdog runs a self-check and prints:
 | `TMUX_TARGET` | `opencode` | tmux session name where OpenCode runs |
 | `TMUX_AUTO_RETRY` | `true` | Automatically interrupt and retry in tmux after recovery |
 | `TMUX_RETRY_PROMPT` | `Please retry the previous request.` | Prompt sent to OpenCode after interrupting |
+| `TMUX_CONTINUE_PROMPT` | `Continue working on the current task and complete any remaining steps.` | Prompt sent when `続ける` is selected in a completion notification |
 | `MAX_DAILY_RECOVERIES` | `10` | Safety cap: max auto-recoveries per day |
 | `WATCH_DIR` | `~/.local/share/opencode/log` | OpenCode log directory to monitor |
 
@@ -198,6 +199,8 @@ ssh opencode-work 'cat /path/to/clubroom-router-nixos/scripts/setup-opencode-hom
 ```
 
 The setup creates a notification-only SSH key, installs the OpenCode event hook and updated watchdog script, and writes a forced `notify-send` command into the home PC's `authorized_keys`; there is no receiver script to run. It configures direct SSH to the home PC's Tailscale IP. No reverse forwarding, port conflict, or background tunnel service is needed. It also removes the old notification reverse-forward setting from the work SSH alias. OpenCode signals the already-running `client-watchdog.sh` through a FIFO when a session becomes idle; the watchdog sends the desktop notification. Its existing quota/IP-recovery behavior is unchanged.
+
+The notification offers **続ける** and **あとで手動** actions. Choosing **続ける** sends a follow-up prompt to the existing OpenCode tmux session; choosing **あとで手動** or dismissing the notification leaves OpenCode idle. The notification desktop must support actions (for example, GNOME Shell or KDE Plasma).
 
 On the OpenCode PC, restart the watchdog once so it uses the updated script, and restart OpenCode once to load the event hook. Keep running the watchdog as you normally do. Both PCs need to be online in Tailscale, and the home PC must be logged into its graphical session. WAN reconnects can interrupt SSH to the work PC, but the watchdog can reconnect to the home PC directly after Tailscale is back.
 

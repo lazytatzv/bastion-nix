@@ -19,6 +19,7 @@ EVENT_FIFO="${EVENT_FIFO:-${HOME}/.local/state/opencode/client-watchdog-events.f
 TMUX_TARGET="${TMUX_TARGET:-opencode}"
 TMUX_AUTO_RETRY="${TMUX_AUTO_RETRY:-true}"
 TMUX_RETRY_PROMPT="${TMUX_RETRY_PROMPT:-Please retry the previous request.}"
+TMUX_CONTINUE_PROMPT="${TMUX_CONTINUE_PROMPT:-Continue working on the current task and complete any remaining steps.}"
 
 echo "=========================================================="
 echo " OpenCode Client Watchdog -> Bastion Router (${ROUTER_HOST})"
@@ -43,8 +44,24 @@ handle_notification_events() {
   while true; do
     while IFS= read -r event; do
       if [ "${event}" = "done" ]; then
-        if ssh -T -o BatchMode=yes -o ConnectTimeout=5 opencode-home-notify; then
-          echo "[watchdog] OpenCode completion notification sent."
+        if selected_action=$(ssh -T -o BatchMode=yes -o ConnectTimeout=5 opencode-home-notify); then
+          case "${selected_action}" in
+            continue)
+              if [ "${TMUX_AUTO_RETRY}" = "true" ] && tmux has-session -t "${TMUX_TARGET}" 2>/dev/null; then
+                tmux send-keys -t "${TMUX_TARGET}" -l "${TMUX_CONTINUE_PROMPT}"
+                tmux send-keys -t "${TMUX_TARGET}" Enter
+                echo "[watchdog] Continue selected; sent follow-up prompt to '${TMUX_TARGET}'."
+              else
+                echo "[watchdog] Continue selected, but tmux session '${TMUX_TARGET}' is unavailable." >&2
+              fi
+              ;;
+            manual|"")
+              echo "[watchdog] Completion notification shown; continuing manually."
+              ;;
+            *)
+              echo "[watchdog] [ERROR] Ignoring unknown notification action." >&2
+              ;;
+          esac
         else
           echo "[watchdog] [ERROR] Failed to send OpenCode completion notification." >&2
         fi
