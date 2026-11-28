@@ -116,7 +116,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/bin/ssh -N -o RemoteForward=127.0.0.1:2222:127.0.0.1:22 -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 ${work_alias}
+ExecStart=/usr/bin/ssh -N -R 127.0.0.1:2222:127.0.0.1:22 -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 ${work_alias}
 Restart=always
 RestartSec=10
 
