@@ -19,6 +19,7 @@ EVENT_FIFO="${EVENT_FIFO:-${HOME}/.local/state/opencode/client-watchdog-events.f
 TMUX_TARGET="${TMUX_TARGET:-opencode}"
 TMUX_AUTO_RETRY="${TMUX_AUTO_RETRY:-true}"
 TMUX_RETRY_PROMPT="${TMUX_RETRY_PROMPT:-Please retry the previous request.}"
+TMUX_REFACTOR_PROMPT="${TMUX_REFACTOR_PROMPT:-Perform one conservative, behavior-preserving refactoring pass on the current project. Make only small, clearly beneficial changes; do not change behavior or public interfaces, and do not commit or push. Run relevant tests and summarize the result. If no safe refactor is obvious, make no changes and explain why.}"
 
 echo "=========================================================="
 echo " OpenCode Client Watchdog -> Bastion Router (${ROUTER_HOST})"
@@ -47,6 +48,15 @@ handle_notification_events() {
           case "${selected_action}" in
             continue)
               echo "[watchdog] Manual follow-up selected; OpenCode remains idle for your next prompt."
+              ;;
+            refactor)
+              if tmux has-session -t "${TMUX_TARGET}" 2>/dev/null; then
+                tmux send-keys -t "${TMUX_TARGET}" -l "${TMUX_REFACTOR_PROMPT}"
+                tmux send-keys -t "${TMUX_TARGET}" Enter
+                echo "[watchdog] Auto-refactoring selected; sent one bounded refactoring task to '${TMUX_TARGET}'."
+              else
+                echo "[watchdog] Auto-refactoring selected, but tmux session '${TMUX_TARGET}' is unavailable." >&2
+              fi
               ;;
             manual|"")
               echo "[watchdog] Completion left idle."

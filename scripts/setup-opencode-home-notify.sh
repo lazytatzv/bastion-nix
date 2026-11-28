@@ -128,7 +128,7 @@ tmp_authorized_keys="$(mktemp)"
 awk -v key="$public_key" 'index($0, key) == 0' "$authorized_keys" > "$tmp_authorized_keys"
 cat "$tmp_authorized_keys" > "$authorized_keys"
 rm -f "$tmp_authorized_keys"
-notify_command="/usr/bin/env XDG_RUNTIME_DIR=/run/user/\$(/usr/bin/id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/\$(/usr/bin/id -u)/bus /usr/bin/notify-send --app-name=OpenCode --action=continue=次の指示を手動で入力 --action=manual=完了・放置 '作業完了' 'OpenCodeの応答が完了しました。'"
+notify_command="/usr/bin/env XDG_RUNTIME_DIR=/run/user/\$(/usr/bin/id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/\$(/usr/bin/id -u)/bus /usr/bin/notify-send --app-name=OpenCode --action=continue=次の指示を手動で入力 --action=manual=完了・放置 --action=refactor=Auto-refactoring '作業完了' 'OpenCodeの応答が完了しました。'"
 printf 'command="%s",restrict %s\n' "$notify_command" "$public_key" >> "$authorized_keys"
 
 echo
