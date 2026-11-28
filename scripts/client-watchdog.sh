@@ -42,7 +42,7 @@ chmod 600 "${EVENT_FIFO}"
 handle_notification_events() {
   while IFS= read -r event; do
     if [ "${event}" = "done" ]; then
-      if printf 'done\n' | ssh -T -o BatchMode=yes -o ConnectTimeout=5 opencode-home-notify; then
+      if ssh -T -o BatchMode=yes -o ConnectTimeout=5 opencode-home-notify; then
         echo "[watchdog] OpenCode completion notification sent."
       else
         echo "[watchdog] [ERROR] Failed to send OpenCode completion notification." >&2

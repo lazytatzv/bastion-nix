@@ -9,13 +9,10 @@ fi
 work_alias="$1"
 remote_repo="$2"
 home_user="$(id -un)"
-receiver_path="${HOME}/.local/bin/opencode-notify-receiver"
 authorized_keys="${HOME}/.ssh/authorized_keys"
 ssh_config="${HOME}/.ssh/config"
 service_dir="${HOME}/.config/systemd/user"
 service_file="${service_dir}/opencode-home-tunnel.service"
-tmp_receiver="$(mktemp)"
-trap 'rm -f "$tmp_receiver"' EXIT
 
 if [[ ! "$work_alias" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "WORK_SSH_ALIAS may contain only letters, numbers, dots, underscores, and hyphens." >&2
@@ -67,13 +64,7 @@ printf '%s\n' "$public_key" | grep -Eq '^ssh-ed25519 [A-Za-z0-9+/=]+( .*)?$' || 
   exit 1
 }
 
-echo "Installing the notification receiver on this PC..."
-ssh "${work_alias}" bash -s -- "${remote_repo}" <<'REMOTE' > "$tmp_receiver"
-set -euo pipefail
-cat "$1/scripts/opencode-notify-receiver"
-REMOTE
-install -Dm755 "$tmp_receiver" "$receiver_path"
-
+echo "Installing the desktop notification dependency..."
 if ! command -v notify-send >/dev/null 2>&1; then
   if ! command -v pacman >/dev/null 2>&1; then
     echo "Install libnotify using your distribution's package manager, then rerun this script." >&2
@@ -87,9 +78,12 @@ install -d -m 700 "$(dirname "$authorized_keys")"
 touch "$authorized_keys"
 chmod 600 "$authorized_keys"
 
-if ! grep -Fq "$public_key" "$authorized_keys"; then
-  printf 'command="%s",restrict %s\n' "$receiver_path" "$public_key" >> "$authorized_keys"
-fi
+tmp_authorized_keys="$(mktemp)"
+awk -v key="$public_key" 'index($0, key) == 0' "$authorized_keys" > "$tmp_authorized_keys"
+cat "$tmp_authorized_keys" > "$authorized_keys"
+rm -f "$tmp_authorized_keys"
+notify_command="/usr/bin/env XDG_RUNTIME_DIR=/run/user/\$(/usr/bin/id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/\$(/usr/bin/id -u)/bus /usr/bin/notify-send --app-name=OpenCode '作業完了' 'OpenCodeの応答が完了しました。'"
+printf 'command="%s",restrict %s\n' "$notify_command" "$public_key" >> "$authorized_keys"
 
 install -d -m 700 "$(dirname "$ssh_config")"
 touch "$ssh_config"
