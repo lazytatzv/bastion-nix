@@ -1,69 +1,105 @@
 # bastion-nix
 
-NixOS router and edge compute node for a clubroom LAN.
-Includes WiFi-as-WAN routing, periodic DHCP lease renewal, distributed builds, and local services.
+NixOS configuration for a Wi-Fi-WAN router and edge compute server. The host routes a clubroom LAN through upstream Wi-Fi and also provides shared storage, local web services, monitoring, Tailscale access, and build capacity.
 
+## Network overview
+
+```text
+Upstream Wi-Fi (wlan0, DHCP)
+          |
+     bastion-nix
+          |
+LAN (enp2s0, 192.168.50.1/24)
+  ├── DHCP and DNS
+  ├── NFS and FileBrowser
+  ├── Caddy local reverse proxy
+  └── Tailscale subnet route
 ```
-                   +------------------------------------+
-                   |   Upstream WiFi (Campus WAN)       |
-                   +-----------------+------------------+
-                                     | wlan0 (DHCP / Auto-Release)
-                              [ bastion-nix ]
-                                     | enp2s0 (192.168.50.1/24)
-                   +-----------------+------------------+
-                   |   Clubroom LAN (BBR/CAKE)          |
-                   +------------------------------------+
-```
 
----
+The checked-in host profile uses `wlan0` for WAN, `enp2s0` for LAN, and `192.168.50.1/24` as the router address. These are deployment-specific defaults; review them before using this configuration on different hardware or a different network.
 
-## Architecture & Modules
+## Repository layout
 
-Modular NixOS configuration. Each module in `modules/` is decoupled with configurable options and exported via flakes for standalone reuse across other machines.
-
-```
+```text
 .
-├── flake.nix                  # Flake entrypoint & exported nixosModules
-├── configuration.nix          # Machine root configuration
-├── hardware-configuration.nix # Target hardware configuration
-├── Makefile                   # Deployment shortcuts
-├── scripts/
-│   └── client-watchdog.sh     # Client PC watcher: triggers remote renew-wan-ip via SSH
-└── modules/
-    ├── default.nix            # Module aggregation
-    ├── wifi-as-wan.nix        # WiFi-as-WAN routing, DHCP release, MAC randomization
-    ├── router.nix             # Machine profile enabling host modules
-    ├── performance.nix        # Zen kernel, BBR + CAKE, sysctl, tmpfs
-    ├── proxy.nix              # Caddy reverse proxy (*.lan)
-    ├── monitoring.nix         # Prometheus + Node Exporter + Grafana
-    ├── services.nix           # NFS NAS, FileBrowser, Tailscale, Docker, Distccd
-    ├── runner.nix             # GitHub Actions self-hosted runner
-    └── system.nix             # Base system, users, nix-daemon optimization
+├── flake.nix
+├── configuration.nix
+├── hardware-configuration.nix
+├── Makefile
+├── modules/
+│   ├── default.nix
+│   ├── wifi-as-wan.nix
+│   ├── router.nix
+│   ├── performance.nix
+│   ├── proxy.nix
+│   ├── monitoring.nix
+│   ├── services.nix
+│   ├── runner.nix
+│   └── system.nix
+└── scripts/
+    ├── archer-reconnect.zsh
+    ├── client-watchdog.sh
+    ├── opencode-home-notify.js
+    ├── opencode-notify-receiver
+    └── setup-opencode-home-notify.sh
 ```
 
----
+`configuration.nix` imports the hardware configuration and module set. `modules/router.nix` enables the services and network profile for this host. The flake exposes the modules for reuse by other NixOS configurations.
 
-## Reusable Flake Modules
+## Deploying this host
 
-Import modules into external flakes (`flake.nix`):
+The Makefile targets the `bastion` flake configuration:
+
+```bash
+# Build and activate now
+make switch
+
+# Activate for the current boot without changing the boot default
+make test
+
+# Build and set as the next boot configuration
+make boot
+
+# Update flake inputs
+make update
+```
+
+Equivalent direct commands include:
+
+```bash
+sudo nixos-rebuild switch --flake .#bastion
+nix flake check
+```
+
+The flake also provides `nixos`, `bastion`, and `router` configuration names; all currently use the same `configuration.nix`. `make cp` is a legacy helper that copies repository files into `/etc/nixos`; prefer deploying from the flake checkout instead.
+
+## Modules and reuse
+
+The exported modules are:
+
+| Flake output | Main options |
+| --- | --- |
+| `nixosModules.default` | Imports all modules |
+| `nixosModules.wifiAsWan` | `services.wifi-as-wan.*` |
+| `nixosModules.performance` | `profiles.performance.*` |
+| `nixosModules.proxy` | `services.clubroom-proxy.*` |
+| `nixosModules.monitoring` | `services.clubroom-monitoring.*` |
+| `nixosModules.services` | `services.clubroom-services.*` |
+| `nixosModules.runner` | `services.bastion-runner.*` |
+| `nixosModules.system` | Base NixOS settings |
+| `nixosModules.router` | This repository's host profile; requires the related option modules |
+
+Example importing one module from another flake:
 
 ```nix
 {
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    bastion-nix.url = "github:lazytatzv/bastion-nix";
-  };
+  inputs.bastion-nix.url = "github:lazytatzv/bastion-nix";
 
   outputs = { self, nixpkgs, bastion-nix, ... }: {
     nixosConfigurations.my-router = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
       modules = [
-        # Import single module
         bastion-nix.nixosModules.wifiAsWan
-
-        # Or import all modules and toggle via options
-        # bastion-nix.nixosModules.default
-
         {
           services.wifi-as-wan = {
             enable = true;
@@ -78,193 +114,207 @@ Import modules into external flakes (`flake.nix`):
 }
 ```
 
-Available exported modules:
-* `nixosModules.wifiAsWan` (`services.wifi-as-wan`)
-* `nixosModules.performance` (`profiles.performance`)
-* `nixosModules.proxy` (`services.clubroom-proxy`)
-* `nixosModules.monitoring` (`services.clubroom-monitoring`)
-* `nixosModules.services` (`services.clubroom-services`)
-* `nixosModules.runner` (`services.bastion-runner`)
-* `nixosModules.default` (imports all modules)
+`nixosModules.default` imports all modules, including the repository-specific router, runner, and base-system settings. For a different machine, import only the modules you need and provide the necessary hardware and host configuration.
 
----
+## Router and WAN lease management
 
-## Deployment
+The `wifi-as-wan` module uses `systemd-networkd` for WAN DHCP and the LAN address, `iwd` for upstream Wi-Fi, `dnsmasq` for LAN DHCP/DNS, and nftables-backed NixOS NAT/firewall configuration. It sends DHCP release when bringing down the WAN interface.
 
-```bash
-# Build and switch configuration
-make switch
-# or: sudo nixos-rebuild switch --flake .#nixos
+`renew-wan-ip` performs a manual WAN lease renewal:
 
-# Test without modifying bootloader
-make test
+1. Brings the WAN interface down to release its DHCP lease.
+2. Restarts `iwd` (configured for per-network MAC randomization).
+3. Brings the interface back up and waits up to 30 seconds for a ping to `1.1.1.1`.
+4. Returns a failure status if connectivity does not return in time.
 
-# Update flake locks
-make update
-```
-
----
-
-## WAN Lease Renewal & Client Watchdog
-
-Upstream WiFi leases global IPs via DHCP. To obtain a new lease without exhausting the DHCP pool, `renew-wan-ip` issues a clean `DHCPRELEASE`, restarts `iwd` with a randomized MAC address, then waits until internet connectivity is confirmed via ping before returning.
-
-### Automated Periodic Renewal (Router-side)
-
-A daily renewal runs at 04:00 with up to 30 minutes of random jitter (`RandomizedDelaySec`), so the reconnect does not happen at exactly the same time every day.
+The host also schedules a daily renewal at 04:00 with up to 30 minutes of systemd randomized delay. This can briefly interrupt the internet connection for all LAN clients.
 
 ```bash
-# Check the timer status on the router
+# On the router: inspect the timer and its next run
 systemctl list-timers rotate-wan-ip
 
-# Trigger manually on the router
-renew-wan-ip
+# On the router: renew the WAN lease now
+sudo renew-wan-ip
 ```
 
-### Client Watchdog (Run on your Linux PC)
+The router profile enables `autoDisableConflicts` because NetworkManager and `systemd-resolved` conflict with this network setup. A different host using the module must either disable the conflicting services or explicitly enable that option.
 
-`scripts/client-watchdog.sh` runs on your **client Linux machine** (the one running OpenCode).
-It watches local OpenCode logs for connection and provider usage-limit errors.
+## Services
 
-For `ECONNRESET` or `Connection lost due to` errors, it skips WAN renewal and retries OpenCode. Provider rate limits and quota errors trigger a notification to the home PC and pause automatic refactoring for that watchdog run; they do not renew the WAN IP or retry the request.
+| Service | LAN access | Details |
+| --- | --- | --- |
+| Router / default site | `http://router.lan` | Redirects to the NAS/FileBrowser site |
+| AdGuard Home | `http://adguard.lan` or `http://dns.lan` | Web UI on port 3000; DNS upstream resolver listens on localhost port 5335 |
+| FileBrowser | `http://nas.lan`, `http://drive.lan`, or `http://files.lan` | Serves `/data` on port 8080 |
+| Grafana | `http://grafana.lan`, `http://monitor.lan`, or `http://status.lan` | Proxied to Grafana on localhost port 3100 |
+| Prometheus | Router localhost `127.0.0.1:9090` | Scrape and query endpoint; not directly LAN-accessible by default |
+| distcc status | `http://distcc.lan` | Caddy proxy to port 3633 |
+| distccd | `192.168.50.1:3632` | Distributed compiler daemon |
+| NFS | `192.168.50.1:/data` | Exported to the configured LAN subnet and Tailscale CGNAT range |
 
-#### Setup (one-time)
+Local `*.lan` names are mapped to the router address by dnsmasq and routed by Caddy. Access from Tailscale depends on the subnet route being enabled/approved in the tailnet as well as client routing and DNS configuration.
 
-**Step 1 — Start OpenCode inside a named tmux session**:
+The services module also enables Tailscale, Docker with BuildKit, and the GitHub Actions self-hosted runner. The runner is configured for the repository URL in `modules/router.nix`; its registration token is read from `/var/lib/github-runner/token` and must be provisioned on the host.
+
+## Monitoring and performance profile
+
+The monitoring module configures Node Exporter on localhost port 9100, Prometheus on localhost port 9090 with 30-day retention, and Grafana on localhost port 3100. Caddy exposes Grafana on the LAN.
+
+The performance module selects the Zen kernel by default, configures BBR and CAKE, uses a RAM-backed `/tmp` (default 16 GiB), enables zram, and tunes CPU, VM, and I/O settings. It also sets the kernel parameter `mitigations=off`; this trades security mitigations for performance and should be reviewed before reusing this profile on a machine that handles untrusted workloads or sensitive data.
+
+## OpenCode client watchdog
+
+`scripts/client-watchdog.sh` runs on the Linux PC where OpenCode is running. It tails OpenCode logs in `~/.local/share/opencode/log` and expects OpenCode to run inside a tmux session named `opencode`.
+
+Start OpenCode and the watchdog in separate terminals:
+
 ```bash
 tmux new -s opencode
-# (inside the session)
+# Inside tmux:
 opencode
 ```
 
-**Step 2 — Run the watchdog in another terminal or tmux pane**:
 ```bash
 ./scripts/client-watchdog.sh
 ```
 
-On startup, the watchdog checks the tmux session and OpenCode log directory:
-```
-[watchdog] tmux session 'opencode' ............... OK ✓
-[watchdog] OpenCode log directory ................ OK ✓
-[watchdog] All systems ready! 🚀
-```
+Behavior:
 
-#### What happens when an error is detected
+* `ECONNRESET` and `Connection lost due to` are treated as connection failures. If enabled and the tmux session exists, the watchdog interrupts the current prompt and sends `Please retry the previous request.` It does not renew the WAN lease.
+* Provider rate-limit/quota patterns (including `429`, `QuotaExceeded`, and `Free usage limit reached`) trigger a local desktop notification and a notification to the home PC. No WAN-IP change or automatic retry is attempted for these provider limits.
+* A detected provider limit pauses automatic refactoring for the rest of that watchdog process. Restart the watchdog after the provider limit is cleared to resume.
+* `session.idle` events from the OpenCode plugin are passed to the watchdog through a local FIFO. On each idle event, it sends a completion notification to the home PC and, by default, submits one conservative behavior-preserving refactoring task to the OpenCode tmux session. The next idle event repeats this cycle. The prompt asks OpenCode to run relevant tests and not commit or push.
+* This is intentionally a repeated automation loop: stop the watchdog or set `AUTO_REFACTOR_ON_IDLE=false` if you do not want another pass to start after each completion. Do not run multiple watchdog instances for the same OpenCode session.
 
-1. Watchdog detects an error in the OpenCode log
-2. For connection errors, it skips WAN renewal and retries OpenCode in tmux.
-3. For provider usage limits, it notifies both the client and home PC, then stops automatic retries/refactoring for the current watchdog run.
-
-#### Configuration via environment variables
+Configuration environment variables:
 
 | Variable | Default | Description |
-| :--- | :--- | :--- |
-| `TMUX_TARGET` | `opencode` | tmux session name where OpenCode runs |
-| `TMUX_AUTO_RETRY` | `true` | Automatically retry connection errors in tmux |
-| `AUTO_REFACTOR_ON_IDLE` | `true` | Automatically start one bounded refactoring pass each time a session becomes idle |
-| `TMUX_RETRY_PROMPT` | `Please retry the previous request.` | Prompt sent to OpenCode after a connection error |
+| --- | --- | --- |
 | `WATCH_DIR` | `~/.local/share/opencode/log` | OpenCode log directory to monitor |
+| `TMUX_TARGET` | `opencode` | tmux session containing OpenCode |
+| `TMUX_AUTO_RETRY` | `true` | Retry detected connection failures in tmux |
+| `TMUX_RETRY_PROMPT` | `Please retry the previous request.` | Prompt used for connection-error retry |
+| `AUTO_REFACTOR_ON_IDLE` | `true` | Submit a bounded refactoring task on each idle event |
+| `TMUX_REFACTOR_PROMPT` | Built-in conservative refactor prompt | Override the automatic refactor prompt |
+| `PATTERN` | Built-in connection/quota regex | Override log patterns watched by the script |
+| `EVENT_FIFO` | `~/.local/state/opencode/client-watchdog-events.fifo` | Local FIFO used by the OpenCode plugin |
+| `LIMIT_STATE_FILE` | `/tmp/opencode-client-watchdog.limited` | Records whether this watchdog process detected a limit |
+
+Example with a different tmux session and no automatic refactoring:
 
 ```bash
-# Example: use a custom OpenCode tmux session
-TMUX_TARGET=mywork ./client-watchdog.sh
+TMUX_TARGET=mywork AUTO_REFACTOR_ON_IDLE=false ./scripts/client-watchdog.sh
 ```
 
-### Notify your home PC when OpenCode finishes
+### Inspecting OpenCode logs
 
-OpenCode can send a desktop notification to the Arch PC at home when a session becomes idle or a provider limit is detected. This uses the OpenCode `session.idle` event and a direct SSH connection over Tailscale. Only fixed `done` and `limit` event labels are sent; prompts and generated content are not transmitted.
-
-Run this **once from your home Arch PC**, replacing `opencode-work` with your existing SSH alias and `/path/to/clubroom-router-nixos` with the repository path on the OpenCode PC:
+On the OpenCode PC:
 
 ```bash
-ssh opencode-work 'cat /path/to/clubroom-router-nixos/scripts/setup-opencode-home-notify.sh' \
-  | bash -s -- opencode-work /path/to/clubroom-router-nixos
+# List recent log files
+ls -lt ~/.local/share/opencode/log | head
+
+# Show the newest log's last 100 lines
+f=$(ls -t ~/.local/share/opencode/log/*.log 2>/dev/null | head -n 1)
+[ -n "$f" ] && tail -n 100 "$f" || echo "No OpenCode log found"
+
+# Find likely errors in the newest log
+if [ -n "$f" ]; then
+  grep -Ein 'error|failed|timeout|rate.limit|quota|ECONNRESET|connection|retry' "$f" | tail -n 80
+else
+  echo "No OpenCode log found"
+fi
 ```
 
-The setup creates a notification-only SSH key, installs the OpenCode event hook and updated watchdog script, and installs a restricted notification receiver on the home PC. Only fixed `done` and `limit` notification events are accepted. It configures direct SSH to the home PC's Tailscale IP. No reverse forwarding, port conflict, or background tunnel service is needed. It also removes the old notification reverse-forward setting from the work SSH alias.
+Logs can contain prompt or project data. Review and redact sensitive content before sharing log excerpts.
 
-OpenCode signals the already-running `client-watchdog.sh` through a FIFO when a session becomes idle. The watchdog notifies the home PC, then automatically sends one conservative, behavior-preserving refactoring task to the `opencode` tmux session. Each completed pass triggers another notification and another pass. Refactoring is paused when a provider usage limit is detected; after the limit is available again, restart the watchdog to resume.
+## Completion and usage-limit notifications to a home PC
 
-On the OpenCode PC, restart the watchdog and OpenCode once to load the changes. Keep running the watchdog as usual. Both PCs need to be online in Tailscale, and the home PC must be logged into its graphical session. WAN reconnects can interrupt SSH to the work PC, but the watchdog can reconnect to the home PC directly after Tailscale is back.
+The OpenCode plugin at `scripts/opencode-home-notify.js` subscribes to OpenCode's `session.idle` event and sends only the fixed `done` event through the local FIFO. The watchdog sends the desktop notification over direct SSH on Tailscale. For a recognized provider limit, the watchdog sends the fixed `limit` event. Neither event contains prompts or generated content.
 
-#### Reconnecting to the work PC from your home Arch PC
+### Prerequisites
 
-The regular `ssh archer` command does not reconnect automatically. To use the reconnecting `archer` shell function, source the repository script from your home Arch PC's `~/.zshrc` (replace the path with the local clone path):
+* The home Arch PC and OpenCode PC are both connected to Tailscale.
+* The home PC has an active graphical session and `notify-send` (the setup script can install `libnotify` on Arch).
+* SSH works from the home PC to the OpenCode PC using a host alias and key-based, non-interactive authentication.
+* The OpenCode PC has a local checkout of this repository, and the OpenCode client watchdog runs in the same user account as OpenCode.
+
+### Install or update the integration
+
+Run this from the home Arch PC, replacing the alias and remote checkout path with the actual values:
+
+```bash
+ssh opencode-work 'cat /home/yano/bastion-nix/scripts/setup-opencode-home-notify.sh' \
+  | bash -s -- opencode-work /home/yano/bastion-nix
+```
+
+The setup script installs the plugin and watchdog on the OpenCode PC, configures a dedicated SSH key and Tailscale SSH alias, installs a restricted notification receiver on the home PC, and adds a forced command for that key to `authorized_keys`. The receiver accepts only the fixed `done` and `limit` event names. The setup removes the old reverse port-forward configuration for this notification path; no reverse tunnel or port 2222 is used.
+
+After setup, restart both OpenCode and the client watchdog on the OpenCode PC. Keep the watchdog running. The home PC must remain logged into its desktop session to display notifications.
+
+## Reconnecting to the OpenCode PC from home
+
+`ssh archer` itself does not reconnect. The optional zsh function in `scripts/archer-reconnect.zsh` retries after the SSH process exits unsuccessfully and uses SSH keepalives to detect a dead connection. It starts a new SSH session after connectivity returns; it cannot preserve the old session.
+
+On the home Arch PC, add the source line to `~/.zshrc` (adjust the path to the local repository clone), then load it:
 
 ```zsh
 echo 'source ~/bastion-nix/scripts/archer-reconnect.zsh' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-Then run `archer`. If SSH disconnects, it retries every 2 seconds; keep the terminal open while it reconnects and press `Ctrl-C` to stop. SSH keepalives detect an unreachable connection after about 45 seconds. This does not make the underlying SSH connection seamless; it starts a new SSH session after the network is reachable again.
+Connect using the function name, not `ssh archer`:
 
-#### Manual on-demand lease renewal (from your client PC)
-
-Add this alias to your `~/.bashrc` or `~/.zshrc`:
-```bash
-alias renew-ip="ssh yano@192.168.50.1 renew-wan-ip"
+```zsh
+archer
 ```
 
-Then just run:
-```bash
-renew-ip
-```
+It retries every two seconds after a disconnect. Keep the terminal open; press `Ctrl-C` to stop retrying. The function assumes the SSH host alias `archer` is already configured in `~/.ssh/config`.
 
----
+## Remote compilation
 
-## Network Endpoints
+### distcc
 
-Accessible via LAN (`*.lan`) or Tailscale:
+On a Linux client with distcc installed, configure the router as a compiler host:
 
-| Service | LAN URL | Port | Backend |
-| :--- | :--- | :--- | :--- |
-| FileBrowser (NAS) | `http://nas.lan` | `8080` | `/data` Web GUI |
-| AdGuard Home | `http://adguard.lan` | `3000` | DNS Sinkhole & Upstream Cache |
-| Grafana Dashboard | `http://grafana.lan` | `3100` | System metrics & monitoring |
-| Prometheus | - | `9090` | Time-series metrics engine |
-| Distcc Status | `http://distcc.lan` | `3633` | Distributed compiler monitor |
-| Default HTTP Root | `http://router.lan` | `80` | Redirects to NAS |
-
----
-
-## Distributed Compilation & Remote Builder
-
-Offload C/C++ (ROS 2 / CMake) builds to the router's 8C/16T CPU:
-
-### 1. distcc (ROS 2 / Make / CMake)
-
-Client setup (`~/.bashrc`):
 ```bash
 export DISTCC_HOSTS="192.168.50.1/16"
 export CC="distcc gcc"
 export CXX="distcc g++"
 ```
 
-Compile with 16 parallel jobs:
+Then use the normal build tool with parallel jobs, for example:
+
 ```bash
 colcon build --parallel-workers 16
-# or: make -j16
+make -j16
 ```
 
-### 2. Nix Remote Builder
+Ensure the client and router have compatible compiler versions and target environments. distcc is intended for compatible C/C++ compilation, not arbitrary build steps.
 
-Add to client `~/.config/nix/nix.conf`:
+### Nix remote builder
+
+Add the router as a builder in the client's Nix configuration (for example `~/.config/nix/nix.conf`):
+
 ```conf
 builders = ssh://yano@192.168.50.1 x86_64-linux - 16 1 kvm,benchmark,big-parallel
 ```
 
-Then invoke `nix build` or `nix develop` normally; derivations compile on the router's RAM disk.
+The router's SSH account and Nix daemon must be configured to accept the client's key and builder connection. Nix may schedule eligible derivations on the router when running `nix build`.
 
----
+## NFS client mount
 
-## NFS Storage Mount
-
-Shared directory: `/data`
+The server exports `/data` to the configured LAN subnet and Tailscale CGNAT range. On a client:
 
 ```bash
-# Mount on client
-sudo mount -t nfs 192.168.50.1:/data /mnt
+sudo mkdir -p /mnt/nfs
+sudo mount -t nfs 192.168.50.1:/data /mnt/nfs
+```
 
-# Persistent mount in /etc/fstab
+Optional `/etc/fstab` entry:
+
+```fstab
 192.168.50.1:/data  /mnt/nfs  nfs  _netdev,nofail,x-systemd.automount  0  0
 ```
+
+Check export and firewall policy before exposing this writable share to additional networks.
