@@ -6,6 +6,8 @@ let
   cfg = config.services.wifi-as-wan;
 
   renewScript = pkgs.writeShellScriptBin "renew-wan-ip" ''
+    set -uo pipefail
+
     echo "=== Gracefully Releasing Current WAN IP (DHCPRELEASE) ==="
     if [ "$(${pkgs.coreutils}/bin/id -u)" -ne 0 ]; then
       SUDO="sudo"
@@ -27,13 +29,17 @@ let
     for i in $(${pkgs.coreutils}/bin/seq 1 30); do
       if ${pkgs.iputils}/bin/ping -c 1 -W 1 1.1.1.1 >/dev/null 2>&1; then
         echo "Internet restored in ''${i}s!"
-        break
+        echo "Current IP status on ${cfg.externalInterface}:"
+        ${pkgs.iproute2}/bin/ip -brief addr show ${cfg.externalInterface} || true
+        echo "Done!"
+        exit 0
       fi
       sleep 1
     done
-    echo "Current IP status on ${cfg.externalInterface}:"
-    ${pkgs.iproute2}/bin/ip -brief addr show ${cfg.externalInterface} || true
-    echo "Done!"
+
+    echo "ERROR: Internet connectivity was not restored within 30 seconds." >&2
+    ${pkgs.iproute2}/bin/ip -brief addr show ${cfg.externalInterface} >&2 || true
+    exit 1
   '';
 in {
   options.services.wifi-as-wan = {

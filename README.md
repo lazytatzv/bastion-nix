@@ -124,9 +124,13 @@ renew-wan-ip
 ### Client Watchdog (Run on your Linux PC)
 
 `scripts/client-watchdog.sh` runs on your **client Linux machine** (the one running OpenCode).
-It watches local OpenCode logs for rate-limit/quota responses (`429`, `resource_exhausted`, `used today`, etc.), then SSH-triggers `renew-wan-ip` on the router.
+It watches local OpenCode logs for rate-limit/quota responses (`429`, `resource_exhausted`, `used today`, etc.). To prevent log matches from unexpectedly changing the WAN IP or interrupting SSH, WAN renewal and tmux auto-retry are disabled by default.
 
-For `ECONNRESET` or `Connection lost due to` errors, it skips WAN renewal and retries OpenCode. For rate-limit/quota errors, it renews the WAN IP first, then retries.
+For `ECONNRESET` or `Connection lost due to` errors, it skips WAN renewal. Enable disruptive WAN renewal and tmux retry explicitly only when desired:
+
+```bash
+WAN_AUTO_RENEW=true TMUX_AUTO_RETRY=true ./client-watchdog.sh
+```
 
 #### Setup (one-time)
 
@@ -165,9 +169,9 @@ On startup, the watchdog runs a self-check and prints:
 #### What happens when an error is detected
 
 1. Watchdog detects an error in the OpenCode log
-2. For `ECONNRESET` or `Connection lost due to`, it skips WAN renewal. For rate-limit/quota errors, it SSH-triggers `renew-wan-ip` on the router.
-3. If renewed, the router reconnects with a randomized MAC and waits for internet connectivity.
-4. Watchdog sends `Escape` twice, types the retry prompt, and presses `Enter` in the `opencode` tmux session.
+2. WAN renewal is skipped by default. When `WAN_AUTO_RENEW=true`, rate-limit/quota matches SSH-trigger `renew-wan-ip` on the router. `ECONNRESET` and `Connection lost due to` never trigger WAN renewal.
+3. If renewal is enabled, the router reconnects with a randomized MAC and reports failure if internet connectivity does not return within 30 seconds.
+4. tmux retry is also disabled by default. When `TMUX_AUTO_RETRY=true`, the watchdog sends `Escape` twice, types the retry prompt, and presses `Enter` in the `opencode` tmux session after a recoverable event.
 
 #### Configuration via environment variables
 
@@ -176,7 +180,8 @@ On startup, the watchdog runs a self-check and prints:
 | `ROUTER_HOST` | `192.168.50.1` | Router LAN IP |
 | `ROUTER_USER` | `yano` | SSH user on the router |
 | `TMUX_TARGET` | `opencode` | tmux session name where OpenCode runs |
-| `TMUX_AUTO_RETRY` | `true` | Automatically interrupt and retry in tmux after recovery |
+| `WAN_AUTO_RENEW` | `false` | Allow rate-limit/quota matches to disruptively renew the router WAN IP |
+| `TMUX_AUTO_RETRY` | `false` | Automatically interrupt and retry in tmux after a recoverable event |
 | `TMUX_RETRY_PROMPT` | `Please retry the previous request.` | Prompt sent to OpenCode after interrupting |
 | `MAX_DAILY_RECOVERIES` | `10` | Safety cap: max auto-recoveries per day |
 | `WATCH_DIR` | `~/.local/share/opencode/log` | OpenCode log directory to monitor |
@@ -185,6 +190,27 @@ On startup, the watchdog runs a self-check and prints:
 # Example: custom session name and higher daily cap
 TMUX_TARGET=mywork MAX_DAILY_RECOVERIES=20 ./client-watchdog.sh
 ```
+
+### Notify your home PC when OpenCode finishes
+
+OpenCode can send a desktop notification to the Arch PC at home when a session becomes idle. This uses the OpenCode `session.idle` event and a reverse SSH tunnel opened by the existing home-to-work SSH connection. Only a fixed `done` event is sent; prompts and generated content are not transmitted.
+
+Run this **once from your home Arch PC**, replacing `opencode-work` with your existing SSH alias and `/path/to/clubroom-router-nixos` with the repository path on the OpenCode PC:
+
+```bash
+ssh opencode-work 'cat /path/to/clubroom-router-nixos/scripts/setup-opencode-home-notify.sh' \
+  | bash -s -- opencode-work /path/to/clubroom-router-nixos
+```
+
+The setup creates a notification-only SSH key, installs the receiver and OpenCode plugin, and configures the reverse tunnel. It preserves existing SSH keys and config entries. On the OpenCode PC, restart OpenCode once to load the plugin.
+
+After setup, the everyday routine is just this on the home PC:
+
+```bash
+~/.local/bin/ssh-opencode-work
+```
+
+Keep that SSH window connected while using OpenCode. The plugin starts automatically with OpenCode; no separate script needs to run on the OpenCode PC. The home PC needs an active graphical login session to show notifications. The setup script installs `libnotify` if missing and enables `sshd`.
 
 #### Manual on-demand lease renewal (from your client PC)
 

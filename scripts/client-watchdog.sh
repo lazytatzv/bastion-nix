@@ -16,7 +16,8 @@ PATTERN="${PATTERN:-used today.*free messages|free usage limit reached|connectio
 MAX_DAILY_RECOVERIES="${MAX_DAILY_RECOVERIES:-10}"
 STATE_FILE="${STATE_FILE:-/tmp/opencode-client-watchdog.state}"
 TMUX_TARGET="${TMUX_TARGET:-opencode}"
-TMUX_AUTO_RETRY="${TMUX_AUTO_RETRY:-true}"
+WAN_AUTO_RENEW="${WAN_AUTO_RENEW:-false}"
+TMUX_AUTO_RETRY="${TMUX_AUTO_RETRY:-false}"
 TMUX_RETRY_PROMPT="${TMUX_RETRY_PROMPT:-Please retry the previous request.}"
 
 echo "=========================================================="
@@ -25,6 +26,7 @@ echo "=========================================================="
 echo "Target Log Directory : ${WATCH_DIR}"
 echo "Daily Recovery Cap   : ${MAX_DAILY_RECOVERIES} times / day"
 echo "Router Target        : ${ROUTER_USER}@${ROUTER_HOST}"
+echo "WAN Auto-Renew       : ${WAN_AUTO_RENEW}"
 echo "tmux Auto-Retry      : ${TMUX_AUTO_RETRY} (target: '${TMUX_TARGET}', interrupt: 'Escape Escape')"
 echo ""
 
@@ -124,6 +126,9 @@ while true; do
           echo "[watchdog] Connection error detected; skipping WAN IP renewal."
           notify-send "OpenCode Watchdog" "通信エラーを検知しました。IP更新なしで再試行します。" 2>/dev/null || true
           recovery_ready=true
+        elif [ "${WAN_AUTO_RENEW}" != "true" ]; then
+          echo "[watchdog] Rate-limit/quota response detected; WAN renewal is disabled."
+          echo "[watchdog] Set WAN_AUTO_RENEW=true to explicitly allow disruptive WAN renewal."
         else
           current_count=$(get_daily_count)
 
