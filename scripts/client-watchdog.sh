@@ -197,6 +197,14 @@ while true; do
               notify-send -u normal "OpenCode Watchdog" "WAN IP更新完了 (${new_count}/${MAX_DAILY_RECOVERIES}回目)。接続が復旧しました。" 2>/dev/null || true
               printf '\a'
               recovery_ready=true
+
+              if command -v tailscale >/dev/null 2>&1; then
+                if tailscale debug restun; then
+                  echo "[watchdog] Requested an immediate Tailscale STUN refresh after WAN renewal."
+                else
+                  echo "[watchdog] [WARN] Could not refresh Tailscale STUN state. Run 'sudo tailscale set --operator=$(id -un)' once to allow this user to refresh it."
+                fi
+              fi
             else
               echo "[watchdog] [ERROR] Failed to execute renew-wan-ip on router via SSH."
               notify-send -u critical "OpenCode Watchdog" "ルーターへのSSH接続またはIP更新に失敗しました。" 2>/dev/null || true

@@ -182,6 +182,7 @@ Behavior:
 
 * `ECONNRESET` and `Connection lost due to` are treated as connection failures. If enabled and the tmux session exists, the watchdog interrupts the current prompt and sends `Please retry the previous request.` It does not renew the WAN lease for these connection errors.
 * Rate-limit/quota patterns (including `429`, `QuotaExceeded`, and `Free usage limit reached`) trigger notifications on the client and home PC, then run `renew-wan-ip` on the router. If WAN renewal succeeds, the watchdog sends the retry prompt to OpenCode. A daily safety cap (10 renewals by default) prevents further automatic renewals after it is reached.
+* After a successful WAN renewal, the watchdog asks Tailscale to immediately refresh its public UDP mapping (`tailscale debug restun`). This can reduce the stale-endpoint interval before the home PC can reach `rodep` again. The command needs Tailscale operator permission; grant it once on the OpenCode PC with `sudo tailscale set --operator=yano` (replace `yano` with the account running the watchdog). If permission is missing, WAN recovery and OpenCode retry still continue, and the watchdog prints a warning.
 * `session.idle` events from the OpenCode plugin are passed to the watchdog through a local FIFO. On each idle event, it sends a completion notification to the home PC and, by default, submits one conservative behavior-preserving refactoring task to the OpenCode tmux session. The next idle event repeats this cycle. The prompt asks OpenCode to run relevant tests and not commit or push.
 * This is intentionally a repeated automation loop: stop the watchdog or set `AUTO_REFACTOR_ON_IDLE=false` if you do not want another pass to start after each completion. Do not run multiple watchdog instances for the same OpenCode session.
 
@@ -253,6 +254,14 @@ ssh opencode-work 'cat /home/yano/bastion-nix/scripts/setup-opencode-home-notify
 The setup script installs the plugin and watchdog on the OpenCode PC, configures a dedicated SSH key and Tailscale SSH alias, installs a restricted notification receiver on the home PC, and adds a forced command for that key to `authorized_keys`. The receiver accepts only the fixed `done` and `limit` event names. The setup removes the old reverse port-forward configuration for this notification path; no reverse tunnel or port 2222 is used.
 
 After setup, restart both OpenCode and the client watchdog on the OpenCode PC. Keep the watchdog running. The home PC must remain logged into its desktop session to display notifications.
+
+For prompt Tailscale endpoint refresh after WAN renewals, run this once on the OpenCode PC as an administrator:
+
+```bash
+sudo tailscale set --operator=yano
+```
+
+Replace `yano` with the account running the watchdog. This permits that account to request Tailscale's STUN refresh without restarting the daemon or interrupting the tailnet interface.
 
 ## Reconnecting to the OpenCode PC from home
 
